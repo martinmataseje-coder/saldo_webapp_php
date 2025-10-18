@@ -1,15 +1,14 @@
 # app_streamlit.py
-import os
 import datetime as dt
 from pathlib import Path
 import streamlit as st
 
-from saldo_core import generate_saldo_document
+from saldo_core import generate_saldo_document  # <- dôležité: táto funkcia MUSÍ existovať v saldo_core.py
 
 st.set_page_config(page_title="Saldo generátor", page_icon="📄", layout="centered")
 st.title("Saldo – generátor")
 
-st.caption("Pozn.: Tento variant používa nahraté TEMPLATE/POMÔCKA aj zdroje. Logo je voliteľné cez cestu k súboru.")
+st.caption("Nahraj TEMPLATE, POMÔCKU a dva vstupy. Logo je voliteľné cez cestu k súboru.")
 
 # ---- Uploady / vstupy ----
 template = st.file_uploader("TEMPLATE_saldo.xlsx", type=["xlsx"])
@@ -35,7 +34,6 @@ with col3:
 
 st.divider()
 
-# ---- Spustiť generovanie ----
 if st.button("Generovať", use_container_width=True):
     # Kontroly vstupov
     missing = []
@@ -43,72 +41,59 @@ if st.button("Generovať", use_container_width=True):
     if not helper:   missing.append("POMÔCKA")
     if not src1:     missing.append("Vstup 1 (pohyby)")
     if not src2:     missing.append("Vstup 2 (väzby)")
-
     if missing:
         st.error("Chýbajú súbory: " + ", ".join(missing))
         st.stop()
 
-    # Logo bytes (ak existuje)
-    logo_bytes = None
-    if logo_path:
-        p = Path(logo_path)
-        if p.exists() and p.is_file():
-            try:
-                logo_bytes = p.read_bytes()
-            except Exception as e:
-                st.warning(f"Logo sa nepodarilo načítať ({e}). Pokračujem bez loga.")
-        else:
-            st.info("Logo sa nenašlo na zadanej ceste. Pokračujem bez loga.")
+    # Načítaj všetky uploady do pamäte (aby sa dali použiť viackrát)
+    t_bytes = template.read()
+    h_bytes = helper.read()
+    s1_bytes = src1.read()
+    s2_bytes = src2.read()
 
-    # Bezpečný názov súborov
+    # Logo bytes (voliteľné)
+    logo_bytes = None
+    lp = Path(logo_path) if logo_path else None
+    if lp and lp.exists() and lp.is_file():
+        try:
+            logo_bytes = lp.read_bytes()
+        except Exception as e:
+            st.warning(f"Logo sa nepodarilo načítať ({e}). Pokračujem bez loga.")
+    elif logo_path:
+        st.info("Logo sa nenašlo na zadanej ceste. Pokračujem bez loga.")
+
     safe_name = (hdr_meno or "report").strip().replace(" ", "_")
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 1) XLSX
     xlsx_bytes = None
+    pdf_bytes  = None
+
+    # XLSX
     if export_choice in ("XLSX", "Oboje"):
         try:
             xlsx_bytes = generate_saldo_document(
-                template.read(),
-                helper.read(),
-                src1.read(),
-                src2.read(),
-                hdr_meno=hdr_meno,
-                hdr_sap=hdr_sap,
-                hdr_ucet=hdr_ucet,
-                hdr_spol=hdr_spol or "SWAN a.s.",
-                theme=theme,
-                logo_bytes=logo_bytes,
-                output="xlsx",
+                t_bytes, h_bytes, s1_bytes, s2_bytes,
+                hdr_meno=hdr_meno, hdr_sap=hdr_sap, hdr_ucet=hdr_ucet, hdr_spol=hdr_spol or "SWAN a.s.",
+                theme=theme, logo_bytes=logo_bytes, output="xlsx"
             )
             st.success("✅ XLSX vygenerovaný")
         except Exception as e:
             st.error(f"Chyba pri generovaní XLSX: {e}")
             st.stop()
 
-    # 2) PDF
-    pdf_bytes = None
+    # PDF
     if export_choice in ("PDF", "Oboje"):
         try:
             pdf_bytes = generate_saldo_document(
-                template.read() if template else None,  # pozor: stream je spotrebovaný, načítaj znova ak treba
-                helper.read()   if helper   else None,
-                src1.read()     if src1     else None,
-                src2.read()     if src2     else None,
-                hdr_meno=hdr_meno,
-                hdr_sap=hdr_sap,
-                hdr_ucet=hdr_ucet,
-                hdr_spol=hdr_spol or "SWAN a.s.",
-                theme=theme,
-                logo_bytes=logo_bytes,
-                output="pdf",
+                t_bytes, h_bytes, s1_bytes, s2_bytes,
+                hdr_meno=hdr_meno, hdr_sap=hdr_sap, hdr_ucet=hdr_ucet, hdr_spol=hdr_spol or "SWAN a.s.",
+                theme=theme, logo_bytes=logo_bytes, output="pdf"
             )
             st.success("✅ PDF vygenerované")
         except Exception as e:
             st.error(f"Chyba pri generovaní PDF: {e}")
             st.stop()
 
-    # 3) Download tlačidlá
     st.write("### Stiahnuť výstupy")
     if xlsx_bytes is not None and export_choice in ("XLSX", "Oboje"):
         st.download_button(
