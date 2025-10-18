@@ -1,61 +1,90 @@
+import io, os, datetime as dt
 import streamlit as st
-from pathlib import Path
-from saldo_core import generate_saldo_xlsx
 
-st.set_page_config(page_title="Saldo_1 report", page_icon="📄", layout="centered")
+from saldo_core import generate_saldo_xlsx, generate_saldo_pdf
 
-st.title("📄 Saldo_1 report – generátor")
-st.caption("Template a Pomôcka sa berú z repozitára (data/). Nahraj len pohyby a väzby.")
+st.set_page_config(page_title="Saldo generátor", page_icon="📄", layout="centered")
+st.title("Saldo – generátor")
+
+# ---- Uploady / vstupy ----
+template = st.file_uploader("TEMPLATE_saldo.xlsx", type=["xlsx"])
+helper   = st.file_uploader("pomocka_saldo.xlsx", type=["xlsx"])
+src1     = st.file_uploader("Vstupný súbor 1", type=["xlsx"])
+src2     = st.file_uploader("Vstupný súbor 2", type=["xlsx"])
 
 colA, colB = st.columns(2)
 with colA:
-    hdr_meno = st.text_input("Meno zákazníka", value="", placeholder="Napr. Jozef Pučik")
-    hdr_sap  = st.text_input("SAP ID", value="", placeholder="Napr. 111222547")
+    hdr_meno = st.text_input("Meno zákazníka", "Jožko Mrkvička")
+    hdr_sap  = st.text_input("SAP ID", "1090989")
 with colB:
-    hdr_ucet = st.text_input("Číslo zmluvného účtu", value="", placeholder="Napr. 777777777")
-    hdr_spol = st.text_input("Spoločnosť", value="SWAN a.s.")
+    hdr_ucet = st.text_input("Zmluvný účet", "777777777")
+    hdr_spol = st.text_input("Názov spoločnosti", "SWAN a.s.")
 
-st.markdown("### Súbory (len vstupy – pohyby & väzby)")
-src1 = st.file_uploader("zdroj1.xlsx (pohyby)", type=["xlsx"])
-src2 = st.file_uploader("zdroj2.xlsx (väzby)", type=["xlsx"])
+export_choice = st.radio("Exportovať ako", ["XLS", "PDF", "Oboje"], horizontal=True)
 
-with st.expander("Pokročilé: použiť vlastné TEMPLATE/POMÔCKA (voliteľné)"):
-    use_custom = st.checkbox("Nahrať vlastné TEMPLATE/POMÔCKA")
-    user_template = st.file_uploader("TEMPLATE_saldo.xlsx (voliteľné)", type=["xlsx"]) if use_custom else None
-    user_helper   = st.file_uploader("pomocka k saldo (vlookup).xlsx (voliteľné)", type=["xlsx"]) if use_custom else None
+logo_path_default = "data/logo_4ka_circle.png"
+logo_path = st.text_input("Cesta k logu", logo_path_default)
 
-DATA_DIR = Path(__file__).parent / "data"
-DEFAULT_TEMPLATE = (DATA_DIR / "TEMPLATE_saldo.XLSX").read_bytes() if (DATA_DIR / "TEMPLATE_saldo.XLSX").exists() else None
-DEFAULT_HELPER   = (DATA_DIR / "pomocka k saldo (vlookup).XLSX").read_bytes() if (DATA_DIR / "pomocka k saldo (vlookup).XLSX").exists() else None
+st.divider()
 
-st.markdown("---")
-if st.button("▶️ Generovať report"):
-    missing = []
-    if not hdr_meno: missing.append("Meno")
-    if not hdr_sap:  missing.append("SAP ID")
-    if not hdr_ucet: missing.append("Číslo zmluvného účtu")
-    if not src1:     missing.append("zdroj1 (pohyby)")
-    if not src2:     missing.append("zdroj2 (väzby)")
+# ---- Spustiť generovanie ----
+if st.button("Generovať"):
+    if not all([template, helper, src1, src2]):
+        st.error("Nahraj všetky štyri XLS(X) súbory (template, pomôcka, vstup1, vstup2).")
+        st.stop()
 
-    template_bytes = user_template.read() if (use_custom and user_template) else DEFAULT_TEMPLATE
-    helper_bytes   = user_helper.read()   if (use_custom and user_helper)   else DEFAULT_HELPER
-    if not template_bytes: missing.append("TEMPLATE (data/TEMPLATE_saldo.XLSX)")
-    if not helper_bytes:   missing.append("POMÔCKA (data/pomocka k saldo (vlookup).XLSX)")
+    # 1️⃣ Generovanie XLS
+    xls_bytes = generate_saldo_xlsx(
+        template.read(),
+        helper.read(),
+        src1.read(),
+        src2.read(),
+        hdr_meno,
+        hdr_sap,
+        hdr_ucet,
+        hdr_spol
+    )
 
-    if missing:
-        st.error("Chýbajú: " + ", ".join(missing))
-    else:
-        try:
-            out_bytes = generate_saldo_xlsx(
-                template_bytes, helper_bytes, src1.read(), src2.read(),
-                hdr_meno=hdr_meno, hdr_sap=hdr_sap, hdr_ucet=hdr_ucet, hdr_spol=hdr_spol or "SWAN a.s."
-            )
-            out_name = f"{hdr_meno.strip().replace(' ', '_')}_saldo.xlsx"
-            st.success("Hotovo ✅")
-            st.download_button("📥 Stiahnuť výsledný Excel", data=out_bytes,
-                               file_name=out_name,
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        except Exception as e:
-            st.error(f"Chyba pri generovaní: {e}")
+    safe_name = hdr_meno.strip().replace(" ", "_")
+    ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = "data"
+    os.makedirs(out_dir, exist_ok=True)
+    xls_path = os.path.join(out_dir, f"{safe_name}_saldo_{ts}.xlsx")
+    pdf_path = os.path.join(out_dir, f"{safe_name}_saldo_{ts}.pdf")
 
-st.caption("Tip: TEMPLATE/POMÔCKA spravuješ priamo v priečinku `data/` v repozitári.")
+    # uložiť XLS (potrebné pre PDF)
+    with open(xls_path, "wb") as f:
+        f.write(xls_bytes)
+
+    st.success(f"✅ XLS vygenerovaný: {xls_path}")
+
+    # 2️⃣ Ak si zvolil PDF / Oboje → generuj PDF
+    pdf_bytes = None
+    if export_choice in ("PDF", "Oboje"):
+        if not os.path.exists(logo_path):
+            st.warning(f"Logo nenájdené: {logo_path}")
+        else:
+            generate_saldo_pdf(xls_path, logo_path, pdf_path)
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            st.success(f"✅ PDF vygenerované: {pdf_path}")
+
+    # 3️⃣ Tlačidlá na stiahnutie
+    st.write("### Stiahnuť výstupy")
+    if export_choice in ("XLS", "Oboje"):
+        st.download_button(
+            "⬇️ Stiahnuť XLS",
+            data=xls_bytes,
+            file_name=os.path.basename(xls_path),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+    if export_choice in ("PDF", "Oboje") and pdf_bytes:
+        st.download_button(
+            "⬇️ Stiahnuť PDF",
+            data=pdf_bytes,
+            file_name=os.path.basename(pdf_path),
+            mime="application/pdf",
+            use_container_width=True
+        )
