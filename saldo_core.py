@@ -205,3 +205,19 @@ def generate_saldo_xlsx(
     wb.save(out)
     out.seek(0)
     return out.read()
+# === [EXPORT TO PDF] ===
+from reporting.saldo_pdf_layout import render_saldo_pdf
+
+def generate_saldo_pdf(input_xlsx_path: str, logo_path: str, output_pdf_path: str):
+    """
+    Vygeneruje PDF podľa layoutu v2.9 z existujúceho XLS.
+    """
+    try:
+        render_saldo_pdf(
+            excel_path=input_xlsx_path,
+            logo_path=logo_path,
+            output_pdf=output_pdf_path
+        )
+        print(f"✅ PDF uložené do: {output_pdf_path}")
+    except Exception as e:
+        print(f"❌ Chyba pri generovaní PDF: {e}")
