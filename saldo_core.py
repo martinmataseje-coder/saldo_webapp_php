@@ -147,6 +147,27 @@ def generate_saldo_xlsx(
     ws["B2"] = hdr_meno
     ws["B3"] = hdr_spol
     ws["B4"] = hdr_ucet
+  
+    # === [NOVÝ KROK] Výpočet a zápis celkového zostatku ===
+    try:
+        last_data_row = ws.max_row
+        zostatok_col = None
+        for cell in ws[1]:
+            if str(cell.value).strip().lower() == "zostatok":
+                zostatok_col = cell.column_letter
+                break
+        if zostatok_col:
+            summary_row = last_data_row + 2
+            ws[f"{zostatok_col}{summary_row-1}"] = ""
+            ws[f"{zostatok_col}{summary_row}"] = f"=SUM({zostatok_col}2:{zostatok_col}{last_data_row})"
+            ws[f"{zostatok_col}{summary_row}"].number_format = '#,##0.00 [$€-407]'
+            ws[f"{zostatok_col}{summary_row}"].font = Font(bold=True)
+            prev_col = chr(ord(zostatok_col) - 1)
+            ws[f"{prev_col}{summary_row}"] = "Celkový zostatok:"
+            ws[f"{prev_col}{summary_row}"].font = Font(bold=True)
+    except Exception as e:
+        print(f"Chyba pri výpočte celkového zostatku: {e}")
+    # === [KONIEC NOVÉHO KROKU] ===
 
     out = BytesIO()
     wb.save(out)
