@@ -51,16 +51,32 @@ if st.button("Generovať", use_container_width=True):
     s1_bytes = src1.read()
     s2_bytes = src2.read()
 
-    # Logo bytes (voliteľné)
-    logo_bytes = None
-    lp = Path(logo_path) if logo_path else None
-    if lp and lp.exists() and lp.is_file():
+  # --- Logo bytes (voliteľné; bez zbytočných hlášok) ---
+logo_bytes = None
+
+candidates = []
+# 1) ak používateľ zadal cestu, skúsi ju ako prvú
+if logo_path and logo_path.strip():
+    candidates.append(logo_path.strip())
+
+# 2) fallback: bežné názvy v data/
+candidates += [
+    "data/logo_4ka_circle.png",
+    "data/logo_4ka.png",
+    "data/logo.png",
+    "data/Logo_4ka.png",
+    "data/LOGO_4KA.PNG",
+]
+
+for cand in candidates:
+    p = Path(cand)
+    if p.exists() and p.is_file():
         try:
-            logo_bytes = lp.read_bytes()
-        except Exception as e:
-            st.warning(f"Logo sa nepodarilo načítať ({e}). Pokračujem bez loga.")
-    elif logo_path:
-        st.info("Logo sa nenašlo na zadanej ceste. Pokračujem bez loga.")
+            logo_bytes = p.read_bytes()
+            break
+        except Exception:
+            continue
+# ak sa nič nenašlo, logo_bytes ostane None a appka pokračuje bez loga
 
     safe_name = (hdr_meno or "report").strip().replace(" ", "_")
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
