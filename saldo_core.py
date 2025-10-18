@@ -1,20 +1,25 @@
 # saldo_core.py
 from io import BytesIO
 from typing import Literal, Optional
+import datetime as _dt
+
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XLImage
 
-# PDF export (vyžaduje reportlab v requirements.txt)
+# PDF export
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 HEADER_ROW = 9
 DATE_FMT   = "DD.MM.YY"
 
+# ---------- helpers (xlsx) ----------
 def _find_col(headers, name):
     for i, h in enumerate(headers, start=1):
         if isinstance(h, str) and h.strip() == name:
@@ -29,7 +34,6 @@ def _last_data_row(ws, key_col):
     return last
 
 def _style_ws(ws, c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal, last, theme="blue"):
-    # farby témy (light header + zebra)
     if theme == "blue":
         header_fill = PatternFill("solid", fgColor="EAF2FE")
         zebra_fill  = PatternFill("solid", fgColor="F7FAFF")
@@ -39,7 +43,6 @@ def _style_ws(ws, c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal, last, the
         zebra_fill  = PatternFill("solid", fgColor="F7F7F7")
         head_font   = Font(bold=True, color="111111")
     else:
-        # warm
         header_fill = PatternFill("solid", fgColor="FFF7E6")
         zebra_fill  = PatternFill("solid", fgColor="FFFBF2")
         head_font   = Font(bold=True, color="111111")
@@ -55,25 +58,22 @@ def _style_ws(ws, c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal, last, the
         cell.alignment = Alignment(vertical="center", horizontal="center")
         cell.border = border
 
-    # šírky
     widths = {c_doc:16, c_inv:18, c_dz:14, c_du:16, c_sn:16, c_typ:22, c_amt:14, c_bal:14}
     for col_idx, w in widths.items():
         if col_idx:
             ws.column_dimensions[get_column_letter(col_idx)].width = w
 
-    # formát čísel
     for r in range(HEADER_ROW+1, last+1):
         if c_amt: ws.cell(row=r, column=c_amt).number_format = '#,##0.00'
         if c_bal: ws.cell(row=r, column=c_bal).number_format = '#,##0.00'
 
-    # zebra + orámovanie
     for r in range(HEADER_ROW+1, last+1):
         if (r - (HEADER_ROW+1)) % 2 == 0:
             for c in range(1, ws.max_column+1):
                 ws.cell(row=r, column=c).fill = zebra_fill
                 ws.cell(row=r, column=c).border = border
 
-def _insert_logo(ws, logo_bytes: Optional[bytes]):
+def _insert_logo_xlsx(ws, logo_bytes: Optional[bytes]):
     if not logo_bytes:
         return
     try:
@@ -83,39 +83,162 @@ def _insert_logo(ws, logo_bytes: Optional[bytes]):
     except Exception:
         pass
 
-def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, header_hex="#EAF2FE"):
+# ---------- helpers (pdf) ----------
+def _register_fonts():
+    """
+    Registruje DejaVu Sans (ak je v data/), inak padá na Helvetica.
+    """
+    try:
+        import os
+        base = os.path.dirname(__file__)
+        ttf_regular = os.path.join(base, "data", "DejaVuSans.ttf")
+        ttf_bold    = os.path.join(base, "data", "DejaVuSans-Bold.ttf")
+        if os.path.exists(ttf_regular) and os.path.exists(ttf_bold):
+            pdfmetrics.registerFont(TTFont("DejaVuSans", ttf_regular))
+            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", ttf_bold))
+            return ("DejaVuSans", "DejaVuSans-Bold")
+    except Exception:
+        pass
+    return ("Helvetica", "Helvetica-Bold")
+
+def _fmt_date(v):
+    import datetime
+    if isinstance(v, (datetime.datetime, _dt.datetime, datetime.date, _dt.date)):
+        return v.strftime("%d.%m.%Y")
+    s = str(v).strip() if v is not None else ""
+    if " " in s: s = s.split(" ")[0]
+    if "-" in s:
+        parts = s.split("-")
+        if len(parts) == 3 and all(parts):
+            yyyy, mm, dd = parts
+            return f"{dd}.{mm}.{yyyy}"
+    return s
+
+def _num(v):
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[bytes], header_hex="#25B3AD"):
+    # fonty s diakritikou
+    FONT_REG, FONT_BOLD = _register_fonts()
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="HdrTitle", parent=styles["Title"], fontName=FONT_BOLD))
+    styles.add(ParagraphStyle(name="Base", parent=styles["Normal"], fontName=FONT_REG, fontSize=9))
+
+    # hlavičky a indexy
     headers = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
     c_doc = _find_col(headers, "Číslo dokladu")
-    last = _last_data_row(ws, c_doc)
-    data = [headers]
-    for r in range(HEADER_ROW+1, last+1):
-        data.append([ws.cell(row=r, column=c).value for c in range(1, ws.max_column+1)])
+    c_inv = _find_col(headers, "číslo Faktúry") or _find_col(headers, "Číslo Faktúry")
+    c_dz  = _find_col(headers, "Dátum zadania")
+    c_du  = _find_col(headers, "Dátum účtovania")
+    c_sn  = _find_col(headers, "Splatnosť netto")
+    c_typ = _find_col(headers, "Typ dokladu")
+    c_amt = _find_col(headers, "Čiastka")
+    c_bal = _find_col(headers, "Zostatok")
+    last  = _last_data_row(ws, c_doc)
 
+    # dáta + priebežný zostatok + súčet
+    data = [headers]
+    run_bal = 0.0
+    sum_amt = 0.0
+    def _is_faktura(txt): return isinstance(txt, str) and txt.strip().lower() == "faktúra"
+
+    for r in range(HEADER_ROW+1, last+1):
+        doc = ws.cell(row=r, column=c_doc).value
+        inv = ws.cell(row=r, column=c_inv).value
+        dz  = ws.cell(row=r, column=c_dz).value
+        du  = ws.cell(row=r, column=c_du).value
+        sn  = ws.cell(row=r, column=c_sn).value
+        typ = ws.cell(row=r, column=c_typ).value
+        amt = _num(ws.cell(row=r, column=c_amt).value)
+
+        add_amt = amt if amt is not None else 0.0
+        run_bal += add_amt
+        sum_amt += add_amt
+
+        row = [
+            "" if doc is None else str(doc),
+            "" if (inv is None or not _is_faktura(typ)) else str(inv),
+            _fmt_date(dz),
+            _fmt_date(du),
+            _fmt_date(sn),
+            "" if typ is None else str(typ),
+            "" if amt is None else f"{amt:,.2f}".replace(",", " ").replace(" ", " "),
+            f"{run_bal:,.2f}".replace(",", " ").replace(" ", " "),
+        ]
+        data.append(row)
+
+    # súčet
+    total_row = [""] * len(headers)
+    try:
+        total_row[c_typ-1] = "Súčet"
+        total_row[c_amt-1] = f"{sum_amt:,.2f}".replace(",", " ").replace(" ", " ")
+        total_row[c_bal-1] = f"{run_bal:,.2f}".replace(",", " ").replace(" ", " ")
+    except Exception:
+        pass
+    data.append(total_row)
+
+    # PDF
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
-    styles = getSampleStyleSheet()
-    story = []
 
-    title = Paragraph("<b>Náhľad na fakturačný účet – saldo</b>", styles["Title"])
-    meta  = Paragraph(f"{hdr_spol} — Meno: <b>{hdr_meno}</b> • SAP ID: <b>{hdr_sap}</b> • Zmluvný účet: <b>{hdr_ucet}</b>", styles["Normal"])
-    story += [title, Spacer(1, 6), meta, Spacer(1, 12)]
+    # horný header: logo + nadpis
+    header_cells = []
+    if logo_bytes:
+        header_cells.append(RLImage(BytesIO(logo_bytes), width=120, height=120))
+    else:
+        header_cells.append("")
+
+    title = Paragraph("<b>Náhľad na fakturačný účet – saldo</b>", styles["HdrTitle"])
+    date_line = Paragraph(f"Dátum generovania: {_dt.datetime.now().strftime('%d.%m.%Y')}", styles["Base"])
+    title_table = Table([[header_cells[0], title],
+                         ["", date_line]],
+                        colWidths=[130, None])
+    title_table.setStyle(TableStyle([
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("LEFTPADDING", (0,0), (-1,-1), 0),
+        ("RIGHTPADDING", (0,0), (-1,-1), 0),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+    ]))
+
+    meta  = Paragraph(
+        f"{hdr_spol} — Meno: <b>{hdr_meno}</b> • SAP ID: <b>{hdr_sap}</b> • Zmluvný účet: <b>{hdr_ucet}</b>",
+        styles["Base"]
+    )
+
+    story = [title_table, Spacer(1, 8), meta, Spacer(1, 10)]
 
     table = Table(data, repeatRows=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor(header_hex)),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.HexColor("#0F172A")),
+        ("FONT", (0,0), (-1,-1), FONT_REG),
+        ("FONT", (0,0), (-1,0),  FONT_BOLD),
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#25B3AD")), # tyrkys 4ka
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
         ("ALIGN", (0,0), (-1,0), "CENTER"),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,0), 9),
+
         ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#D0D7E1")),
-        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F7FAFF")]),
+        ("ROWBACKGROUNDS", (0,1), (-1,-2), [colors.white, colors.HexColor("#F9FEFD")]),
+
+        ("FONTSIZE", (0,0), (-1,0), 9),
         ("FONTSIZE", (0,1), (-1,-1), 8),
+
+        ("ALIGN", (2,1), (4,-2), "CENTER"),
+        ("ALIGN", (6,1), (7,-2), "RIGHT"),
+
+        # súčet – posledný riadok
+        ("FONT", (0,-1), (-1,-1), FONT_BOLD),
+        ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#E8FBF7")),
+        ("ALIGN", (6,-1), (7,-1), "RIGHT"),
     ]))
+
     story.append(table)
     doc.build(story)
     buf.seek(0)
     return buf.read()
 
+# ---------- public API ----------
 def generate_saldo_document(
     template_bytes: bytes,
     helper_bytes: bytes,
@@ -235,15 +358,14 @@ def generate_saldo_document(
         else:
             ws.cell(row=rr, column=c_inv, value=None)
 
-    # --- horná hlavička + logo + štýl
+    # --- horná hlavička + logo (XLSX) + štýl
     ws["B1"] = hdr_sap; ws["B2"] = hdr_meno; ws["B3"] = hdr_spol; ws["B4"] = hdr_ucet
-    _insert_logo(ws, logo_bytes)
+    _insert_logo_xlsx(ws, logo_bytes)
     _style_ws(ws, c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal, last, theme=theme)
 
     # --- export
     if output == "pdf":
-        # farbu hlavičky tabuľky odvodíme z témy
-        header_hex = {"blue":"#EAF2FE", "gray":"#EEEEEE", "warm":"#FFF7E6"}.get(theme, "#EAF2FE")
-        return _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, header_hex=header_hex)
+        # pre PDF použíjeme 4ka tyrkys #25B3AD v hlavičke
+        return _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes=logo_bytes, header_hex="#25B3AD")
 
     out = BytesIO(); wb.save(out); out.seek(0); return out.read()
