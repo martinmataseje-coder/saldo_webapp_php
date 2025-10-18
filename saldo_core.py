@@ -1,6 +1,7 @@
 
 from io import BytesIO
 from openpyxl import load_workbook
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 HEADER_ROW = 9
@@ -148,26 +149,57 @@ def generate_saldo_xlsx(
     ws["B3"] = hdr_spol
     ws["B4"] = hdr_ucet
   
-    # === [NOVÝ KROK] Výpočet a zápis celkového zostatku ===
+    # === [NOVÝ KROK] Výpočet a zápis celkového zostatku (fixed) ===
     try:
-        last_data_row = ws.max_row
+        # 1) Zisti, v ktorom riadku je hlavička (u teba konštanta)
+        header_row = HEADER_ROW
+
+        # 2) Nájdime písmeno stĺpca pre "Zostatok" podľa bunky v riadku hlavičky
         zostatok_col = None
-        for cell in ws[1]:
-            if str(cell.value).strip().lower() == "zostatok":
-                zostatok_col = cell.column_letter
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(row=header_row, column=c).value
+            if v and str(v).strip().lower() == "zostatok":
+                zostatok_col = ws.cell(row=header_row, column=c).column_letter
                 break
+
         if zostatok_col:
-            summary_row = last_data_row + 2
+            # 3) Spoľahlivo nájdeme posledný riadok s dátami (odspodu hľadáme prvý neprázdny v kľúčových stĺpcoch)
+            #    Použijeme "Číslo dokladu" ak ho máš (c_doc), inak samotný Zostatok.
+            last_data_row = header_row
+            # skúška podľa stĺpca s dokladom (ak existuje)
+            try:
+                key_col_letter = ws.cell(row=header_row, column=c_doc).column_letter
+            except Exception:
+                key_col_letter = zostatok_col
+
+            for r in range(ws.max_row, header_row, -1):
+                v1 = ws[f"{key_col_letter}{r}"].value
+                v2 = ws[f"{zostatok_col}{r}"].value
+                if (v1 not in (None, "")) or (v2 not in (None, "")):
+                    last_data_row = r
+                    break
+
+            # 4) SUM rozsah: od prvého riadku dát po posledný riadok dát
+            first_data_row = header_row + 1
+            summary_row = last_data_row + 2  # jeden voľný riadok medzi
+
+            # prázdny riadok pre luft
             ws[f"{zostatok_col}{summary_row-1}"] = ""
-            ws[f"{zostatok_col}{summary_row}"] = f"=SUM({zostatok_col}2:{zostatok_col}{last_data_row})"
+
+            # samotná suma
+            ws[f"{zostatok_col}{summary_row}"] = f"=SUM({zostatok_col}{first_data_row}:{zostatok_col}{last_data_row})"
             ws[f"{zostatok_col}{summary_row}"].number_format = '#,##0.00 [$€-407]'
             ws[f"{zostatok_col}{summary_row}"].font = Font(bold=True)
+
+            # popis do stĺpca o jedno vľavo
             prev_col = chr(ord(zostatok_col) - 1)
             ws[f"{prev_col}{summary_row}"] = "Celkový zostatok:"
             ws[f"{prev_col}{summary_row}"].font = Font(bold=True)
+
     except Exception as e:
         print(f"Chyba pri výpočte celkového zostatku: {e}")
     # === [KONIEC NOVÉHO KROKU] ===
+
 
     out = BytesIO()
     wb.save(out)
