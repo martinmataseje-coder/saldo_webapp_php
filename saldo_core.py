@@ -173,8 +173,9 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
             Paragraph(_fmt_date(du), styles["Cell"]),
             Paragraph(_fmt_date(sn), styles["Cell"]),
             Paragraph("" if typ is None else str(typ), styles["Cell"]),
-            Paragraph("" if amt is None else f"{amt:,.2f}".replace(",", " ").replace(" ", " "), styles["Cell"]),
-            Paragraph(f"{run_bal:,.2f}".replace(",", " ").replace(" ", " "), styles["Cell"]),
+            Paragraph("" if amt is None else f"{amt:,.2f} €".replace(",", " ").replace(" ", " "), styles["Cell"]),
+            Paragraph(f"{run_bal:,.2f} €".replace(",", " ").replace(" ", " "), styles["Cell"]),
+
         ]
         data.append(row)
 
