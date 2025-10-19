@@ -220,7 +220,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     story = [header_tbl, Spacer(1, 6), meta, Spacer(1, 10)]
 
     # šírky stĺpcov (A4 portrait, fixné aby sa to zmestilo)
-    col_widths = [65, 65, 58, 58, 58, 68, 50, 55]
+    col_widths = [75, 60, 58, 58, 58, 68, 50, 55]
 
     table = Table(data, repeatRows=1, colWidths=col_widths)
     table.setStyle(TableStyle([
