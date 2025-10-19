@@ -237,10 +237,10 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
 
     story = [header_tbl, Spacer(1, 6), meta, Spacer(1, 10)]
 
-    # šírky stĺpcov (upravené podľa testu – širší prvý stĺpec)
-    col_widths = [75, 60, 58, 58, 58, 68, 50, 55]
+    # šírky stĺpcov (vľavo zarovnaná tabuľka; širšie čísla vpravo)
+    col_widths = [75, 60, 58, 58, 58, 70, 62, 68]
 
-    table = Table(data, repeatRows=1, colWidths=col_widths)
+    table = Table(data, repeatRows=1, colWidths=col_widths, hAlign="LEFT")
     table.setStyle(TableStyle([
         # hlavička
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor(header_hex)),
@@ -260,7 +260,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
         ("FONTSIZE", (0,0), (-1,0), 9),
         ("FONTSIZE", (0,1), (-1,-1), 8),
 
-        # paddingy nech to nie je rozťahané
+        # minimálne vnútorné odsadenia (aby to sedelo k ľavému okraju vizuálne)
         ("LEFTPADDING",  (0,0), (-1,-1), 2),
         ("RIGHTPADDING", (0,0), (-1,-1), 2),
         ("TOPPADDING",   (0,0), (-1,-1), 2),
@@ -404,7 +404,7 @@ def generate_saldo_document(
 
     # --- export
     if output == "pdf":
-        # pre PDF použíjeme 4ka tyrkys #25B3AD v hlavičke
+        # pre PDF použijeme 4ka tyrkys #25B3AD v hlavičke
         return _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes=logo_bytes, header_hex="#25B3AD")
 
     out = BytesIO(); wb.save(out); out.seek(0); return out.read()
