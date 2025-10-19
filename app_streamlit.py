@@ -28,32 +28,16 @@ except Exception as e:
 # --- init session defaults ---
 if "reset_counter" not in st.session_state:
     st.session_state.reset_counter = 0
-if "hdr_meno" not in st.session_state:
-    st.session_state.hdr_meno = ""
-if "hdr_sap" not in st.session_state:
-    st.session_state.hdr_sap = ""
-if "hdr_ucet" not in st.session_state:
-    st.session_state.hdr_ucet = ""
-if "theme" not in st.session_state:
-    st.session_state.theme = "blue"
 if "auto_clear" not in st.session_state:
     st.session_state.auto_clear = True
 
-# --- Pomocné: vymazať polia (bez priameho zápisu do file_uploaderov) ---
 def clear_inputs():
-    # text inputs
-    st.session_state.hdr_meno = ""
-    st.session_state.hdr_sap  = ""
-    st.session_state.hdr_ucet = ""
-    # voľby
-    st.session_state.theme = "blue"
-    st.session_state.auto_clear = True
-    # resetni uploader widgety zvýšením tokenu
+    # ŽIADNE priame nastavovanie widgetov! Len zvýšime reset token:
     st.session_state.reset_counter += 1
 
+rc = st.session_state.reset_counter  # použijeme v kľúčoch
+
 # --- Uploady (len 2 vstupy) ---
-# VŠIMNI SI: kľúče majú suffix reset_counter, aby sa po resete vytvorili nanovo (a tým sa vyprázdnili)
-rc = st.session_state.reset_counter
 with st.container():
     colA, colB = st.columns(2)
     with colA:
@@ -77,19 +61,19 @@ st.divider()
 # --- Textové polia (bez spoločnosti – tá je fixne 'SWAN a.s.') ---
 col1, col2 = st.columns(2)
 with col1:
-    hdr_meno = st.text_input("Meno zákazníka", key="hdr_meno", placeholder="napr. Jožko Mrkvička")
-    hdr_sap  = st.text_input("SAP ID",         key="hdr_sap",  placeholder="napr. 1090989")
+    hdr_meno = st.text_input("Meno zákazníka", key=f"hdr_meno_{rc}", placeholder="napr. Jožko Mrkvička")
+    hdr_sap  = st.text_input("SAP ID",         key=f"hdr_sap_{rc}",  placeholder="napr. 1090989")
 with col2:
-    hdr_ucet = st.text_input("Zmluvný účet",   key="hdr_ucet", placeholder="napr. 777777777")
+    hdr_ucet = st.text_input("Zmluvný účet",   key=f"hdr_ucet_{rc}", placeholder="napr. 777777777")
 
 # pevná spoločnosť
 hdr_spol = "SWAN a.s."
 
-# Výber farebnej schémy (s kľúčom kvôli resetu)
+# Výber farebnej schémy (tiež viazaný na reset token)
 theme = st.radio(
     "Farebná schéma výstupu:",
     ["blue", "gray", "warm"],
-    key="theme",
+    key=f"theme_{rc}",
     format_func=lambda x: {
         "blue": "Firemná (4ka tyrkys)",
         "gray": "Svetlá (sivá)",
@@ -101,7 +85,7 @@ theme = st.radio(
 # Ovládanie vymazania polí
 col_reset_left, col_reset_right = st.columns([1, 1])
 with col_reset_left:
-    auto_clear = st.checkbox("Vymazať polia po generovaní", key="auto_clear")
+    auto_clear = st.checkbox("Vymazať polia po generovaní", key="auto_clear", value=st.session_state.auto_clear)
 with col_reset_right:
     if st.button("Vymazať polia teraz"):
         clear_inputs()
@@ -110,15 +94,15 @@ with col_reset_right:
 st.divider()
 
 # Vždy generujeme OBOJE (XLS aj PDF)
-if st.button("Generovať", use_container_width=True):
+if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
     try:
         # validácia vstupov (povinné)
         missing = []
         if not src1: missing.append("Vstup 1 (pohyby)")
         if not src2: missing.append("Vstup 2 (väzby)")
-        if not hdr_meno.strip(): missing.append("Meno zákazníka")
-        if not hdr_sap.strip():  missing.append("SAP ID")
-        if not hdr_ucet.strip(): missing.append("Zmluvný účet")
+        if not (hdr_meno or "").strip(): missing.append("Meno zákazníka")
+        if not (hdr_sap or "").strip():  missing.append("SAP ID")
+        if not (hdr_ucet or "").strip(): missing.append("Zmluvný účet")
 
         if missing:
             st.error("Doplň povinné polia: " + ", ".join(missing))
@@ -144,7 +128,7 @@ if st.button("Generovať", use_container_width=True):
         src2_bytes = src2.read()
 
         # cesty na uloženie
-        safe_name = hdr_meno.strip().replace(" ", "_")
+        safe_name = (hdr_meno or "").strip().replace(" ", "_") or "report"
         ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         out_dir = "data"
         os.makedirs(out_dir, exist_ok=True)
@@ -154,7 +138,10 @@ if st.button("Generovať", use_container_width=True):
         # ===== XLS =====
         xls_bytes = generate_saldo_document(
             template_bytes, helper_bytes, src1_bytes, src2_bytes,
-            hdr_meno=hdr_meno.strip(), hdr_sap=hdr_sap.strip(), hdr_ucet=hdr_ucet.strip(), hdr_spol=hdr_spol,
+            hdr_meno=(hdr_meno or "").strip(),
+            hdr_sap=(hdr_sap or "").strip(),
+            hdr_ucet=(hdr_ucet or "").strip(),
+            hdr_spol=hdr_spol,
             theme=theme, logo_bytes=logo_bytes, output="xlsx"
         )
         with open(xls_path, "wb") as f:
@@ -164,7 +151,10 @@ if st.button("Generovať", use_container_width=True):
         # ===== PDF =====
         pdf_bytes = generate_saldo_document(
             template_bytes, helper_bytes, src1_bytes, src2_bytes,
-            hdr_meno=hdr_meno.strip(), hdr_sap=hdr_sap.strip(), hdr_ucet=hdr_ucet.strip(), hdr_spol=hdr_spol,
+            hdr_meno=(hdr_meno or "").strip(),
+            hdr_sap=(hdr_sap or "").strip(),
+            hdr_ucet=(hdr_ucet or "").strip(),
+            hdr_spol=hdr_spol,
             theme=theme, logo_bytes=logo_bytes, output="pdf"
         )
         with open(pdf_path, "wb") as f:
