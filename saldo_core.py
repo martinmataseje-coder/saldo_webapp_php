@@ -211,13 +211,23 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
         ("BOTTOMPADDING", (0,0), (-1,-1), 4),
     ]))
 
-    # meta riadok – tučné labely
-    meta = Paragraph(
-        f"{hdr_spol} — <b>Meno:</b> {hdr_meno} • <b>SAP ID:</b> {hdr_sap} • <b>Zmluvný účet:</b> {hdr_ucet}",
-        styles["Base"]
-    )
+   # meta riadok – labely skutočne bold (vlastný štýl)
+meta_style = ParagraphStyle(
+    "Meta",
+    parent=styles["Base"],
+    fontName=FONT_REG,
+    fontSize=9,
+    leading=12
+)
 
-    story = [header_tbl, Spacer(1, 6), meta, Spacer(1, 10)]
+meta_text = (
+    f"{hdr_spol} — "
+    f"<font name='{FONT_BOLD}'>Meno:</font> {hdr_meno} • "
+    f"<font name='{FONT_BOLD}'>SAP ID:</font> {hdr_sap} • "
+    f"<font name='{FONT_BOLD}'>Zmluvný účet:</font> {hdr_ucet}"
+)
+
+meta = Paragraph(meta_text, meta_style)
 
     # šírky stĺpcov (A4 portrait, fixné aby sa to zmestilo)
     col_widths = [75, 60, 58, 58, 58, 68, 50, 55]
