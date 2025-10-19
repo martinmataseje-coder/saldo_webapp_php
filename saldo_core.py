@@ -134,6 +134,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     styles.add(ParagraphStyle(name="Base", parent=styles["Normal"], fontName=FONT_REG, fontSize=9, leading=12))
     styles.add(ParagraphStyle(name="HdrSmall", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=9, alignment=1))  # header v bunke
     styles.add(ParagraphStyle(name="Cell", parent=styles["Normal"], fontName=FONT_REG, fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name="CellRight", parent=styles["Normal"], fontName=FONT_REG, fontSize=8, leading=10, alignment=2))
 
     # pôvodné hlavičky v xlsx
     xhdrs = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
@@ -179,8 +180,8 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
             Paragraph(_fmt_date(du), styles["Cell"]),
             Paragraph(_fmt_date(sn), styles["Cell"]),
             Paragraph("" if typ is None else str(typ), styles["Cell"]),
-            Paragraph(_fmt_money(amt), styles["Cell"]),
-            Paragraph(_fmt_money(run_bal), styles["Cell"]),
+            Paragraph(_fmt_money(amt), styles["CellRight"]),
+            Paragraph(_fmt_money(run_bal), styles["CellRight"]),
         ]
         data.append(row)
 
@@ -191,7 +192,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     total_row[7] = Paragraph(_fmt_money(run_bal), styles["HdrSmall"])
     data.append(total_row)
 
-    # stránka
+    # stránka    
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
 
