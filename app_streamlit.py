@@ -1,5 +1,4 @@
 # app_streamlit.py
-import os
 import datetime as dt
 import streamlit as st
 
@@ -28,14 +27,13 @@ except Exception as e:
 # --- init session defaults ---
 if "reset_counter" not in st.session_state:
     st.session_state.reset_counter = 0
-if "auto_clear" not in st.session_state:
-    st.session_state.auto_clear = True
 
-def clear_inputs():
-    # ŽIADNE priame nastavovanie widgetov! Len zvýšime reset token:
+def reset_ui():
+    """Vyčistí UI (reset)"""
     st.session_state.reset_counter += 1
+    st.rerun()
 
-rc = st.session_state.reset_counter  # použijeme v kľúčoch
+rc = st.session_state.reset_counter  # použije sa v kľúčoch widgetov
 
 # --- Uploady (len 2 vstupy) ---
 with st.container():
@@ -58,7 +56,7 @@ with st.container():
 st.caption("Template a Pomôcka sa načítajú automaticky z priečinka `data/`.")
 st.divider()
 
-# --- Textové polia (bez spoločnosti – tá je fixne 'SWAN a.s.') ---
+# --- Textové polia ---
 col1, col2 = st.columns(2)
 with col1:
     hdr_meno = st.text_input("Meno zákazníka", key=f"hdr_meno_{rc}", placeholder="napr. Jožko Mrkvička")
@@ -66,10 +64,9 @@ with col1:
 with col2:
     hdr_ucet = st.text_input("Zmluvný účet",   key=f"hdr_ucet_{rc}", placeholder="napr. 777777777")
 
-# pevná spoločnosť
 hdr_spol = "SWAN a.s."
 
-# Výber farebnej schémy (tiež viazaný na reset token)
+# --- Výber farebnej schémy ---
 theme = st.radio(
     "Farebná schéma výstupu:",
     ["blue", "gray", "warm"],
@@ -82,21 +79,15 @@ theme = st.radio(
     horizontal=True
 )
 
-# Ovládanie vymazania polí
-col_reset_left, col_reset_right = st.columns([1, 1])
-with col_reset_left:
-    auto_clear = st.checkbox("Vymazať polia po generovaní", key="auto_clear", value=st.session_state.auto_clear)
-with col_reset_right:
-    if st.button("Vymazať polia teraz"):
-        clear_inputs()
-        st.rerun()  # okamžitý refresh UI
+# --- Reset tlačidlo ---
+st.button("🔥 BURN", on_click=reset_ui, help="Reset – vymaže formulár")
 
 st.divider()
 
-# Vždy generujeme OBOJE (XLS aj PDF)
+# --- Generovanie (v pamäti, bez zápisu na disk) ---
 if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
     try:
-        # validácia vstupov (povinné)
+        # validácia vstupov
         missing = []
         if not src1: missing.append("Vstup 1 (pohyby)")
         if not src2: missing.append("Vstup 2 (väzby)")
@@ -108,7 +99,7 @@ if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
             st.error("Doplň povinné polia: " + ", ".join(missing))
             st.stop()
 
-        # načítaj fixné súbory z data/
+        # načítaj fixné súbory
         template_bytes = load_file_bytes(TEMPLATE_PATH)
         helper_bytes   = load_file_bytes(HELPER_PATH)
         if not template_bytes:
@@ -118,24 +109,19 @@ if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
             st.error(f"Chýba pomôcka: `{HELPER_PATH}`")
             st.stop()
 
-        # logo (pevné)
         logo_bytes = load_file_bytes(DEFAULT_LOGO_PATH)
         if not logo_bytes:
             st.warning(f"Logo sa nepodarilo načítať z '{DEFAULT_LOGO_PATH}'. PDF sa vytvorí bez loga.")
 
-        # bytes z uploadov
         src1_bytes = src1.read()
         src2_bytes = src2.read()
 
-        # cesty na uloženie
         safe_name = (hdr_meno or "").strip().replace(" ", "_") or "report"
         ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_dir = "data"
-        os.makedirs(out_dir, exist_ok=True)
-        xls_path = os.path.join(out_dir, f"{safe_name}_saldo_{ts}.xlsx")
-        pdf_path = os.path.join(out_dir, f"{safe_name}_saldo_{ts}.pdf")
+        xls_filename = f"{safe_name}_saldo_{ts}.xlsx"
+        pdf_filename = f"{safe_name}_saldo_{ts}.pdf"
 
-        # ===== XLS =====
+        # --- XLS ---
         xls_bytes = generate_saldo_document(
             template_bytes, helper_bytes, src1_bytes, src2_bytes,
             hdr_meno=(hdr_meno or "").strip(),
@@ -144,11 +130,8 @@ if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
             hdr_spol=hdr_spol,
             theme=theme, logo_bytes=logo_bytes, output="xlsx"
         )
-        with open(xls_path, "wb") as f:
-            f.write(xls_bytes)
-        st.success(f"✅ XLS vygenerovaný: {xls_path}")
 
-        # ===== PDF =====
+        # --- PDF ---
         pdf_bytes = generate_saldo_document(
             template_bytes, helper_bytes, src1_bytes, src2_bytes,
             hdr_meno=(hdr_meno or "").strip(),
@@ -157,18 +140,16 @@ if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
             hdr_spol=hdr_spol,
             theme=theme, logo_bytes=logo_bytes, output="pdf"
         )
-        with open(pdf_path, "wb") as f:
-            f.write(pdf_bytes)
-        st.success(f"✅ PDF vygenerované: {pdf_path}")
 
-        # ===== sťahovanie =====
+        # --- Download ---
+        st.info("Výstupy sa **neukladajú**. Stiahni si XLS/PDF nižšie pred Resetom alebo zatvorením okna.", icon="⚠️")
         st.write("### Stiahnuť výstupy")
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
             st.download_button(
                 "⬇️ Stiahnuť XLS",
                 data=xls_bytes,
-                file_name=os.path.basename(xls_path),
+                file_name=xls_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
@@ -176,15 +157,10 @@ if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
             st.download_button(
                 "⬇️ Stiahnuť PDF",
                 data=pdf_bytes,
-                file_name=os.path.basename(pdf_path),
+                file_name=pdf_filename,
                 mime="application/pdf",
                 use_container_width=True
             )
-
-        # Auto-clear po úspešnom generovaní (ak je zapnuté)
-        if auto_clear:
-            clear_inputs()
-            st.rerun()
 
     except Exception as e:
         st.error("Pri generovaní nastala chyba.")
