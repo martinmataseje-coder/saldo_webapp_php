@@ -1,4 +1,4 @@
-# app_streamlit.py
+    # app_streamlit.py
 import os
 import datetime as dt
 import streamlit as st
@@ -39,20 +39,22 @@ with st.container():
     colA, colB = st.columns(2)
     with colA:
         src1 = st.file_uploader("Vstup 1 (pohyby)", type=["xlsx"], key="src1", help="Nahraj XLSX s položkami/pohybmi.")
-    with colB:
+    with colB:    
         src2 = st.file_uploader("Vstup 2 (väzby)", type=["xlsx"], key="src2", help="Nahraj XLSX, kde je 'Doplnková referencia' (stĺpec G).")
 
 st.caption("Template a Pomôcka sa načítajú automaticky z priečinka `data/`.")
 st.divider()
 
-# --- Textové polia BEZ predvyplnenia (iba placeholdery) ---
+# --- Textové polia (už bez spoločnosti) ---
 col1, col2 = st.columns(2)
 with col1:
     hdr_meno = st.text_input("Meno zákazníka", value="", key="hdr_meno", placeholder="napr. Jožko Mrkvička")
     hdr_sap  = st.text_input("SAP ID",         value="", key="hdr_sap",  placeholder="napr. 1090989")
 with col2:
     hdr_ucet = st.text_input("Zmluvný účet",   value="", key="hdr_ucet", placeholder="napr. 777777777")
-    hdr_spol = st.text_input("Názov spoločnosti", value="", key="hdr_spol", placeholder="napr. SWAN a.s.")
+
+# pevná spoločnosť (užívateľ to neuvidí, ale kód ju použije)
+hdr_spol = "SWAN a.s."
 
 # Výber farebnej schémy PDF/XLS
 theme = st.radio(
