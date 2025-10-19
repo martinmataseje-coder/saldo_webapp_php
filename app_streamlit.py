@@ -1,12 +1,13 @@
 # app_streamlit.py
-import io
 import os
 import datetime as dt
 import streamlit as st
 
 DEFAULT_LOGO_PATH = "data/logo_4ka_circle.png"
+TEMPLATE_PATH     = "data/TEMPLATE_saldo.XLSX"
+HELPER_PATH       = "data/pomocka k saldo (vlookup).XLSX"
 
-def load_logo_bytes(path: str) -> bytes | None:
+def load_file_bytes(path: str) -> bytes | None:
     try:
         with open(path, "rb") as f:
             return f.read()
@@ -16,7 +17,7 @@ def load_logo_bytes(path: str) -> bytes | None:
 st.set_page_config(page_title="Saldo generátor", page_icon="📄", layout="centered")
 st.title("Saldo – generátor")
 
-# --- bezpečný import core, aby sa chyba ukázala priamo v UI ---
+# bezpečný import core, aby sa chyba ukázala priamo v UI
 try:
     from saldo_core import generate_saldo_document
 except Exception as e:
@@ -28,11 +29,11 @@ except Exception as e:
 with st.container():
     colA, colB = st.columns(2)
     with colA:
-        template = st.file_uploader("TEMPLATE_saldo.xlsx", type=["xlsx"])
-        helper   = st.file_uploader("pomôcka (vlookup).xlsx", type=["xlsx"])
+        src1 = st.file_uploader("Vstup 1 (pohyby)", type=["xlsx"])
     with colB:
-        src1     = st.file_uploader("Vstup 1 (pohyby)", type=["xlsx"])
-        src2     = st.file_uploader("Vstup 2 (väzby)", type=["xlsx"])
+        src2 = st.file_uploader("Vstup 2 (väzby)", type=["xlsx"])
+
+st.caption("Template a Pomôcka sa načítajú automaticky z priečinka `data/`.")
 
 st.divider()
 
@@ -46,34 +47,36 @@ with col2:
 
 export_choice = st.radio("Exportovať ako", ["XLS", "PDF", "Oboje"], horizontal=True)
 
-# Voliteľná farebná schéma (môžeš ponechať „Firemná“)
-theme_choice = st.radio(
-    "Farebná schéma výstupu:", 
-    ["Firemná (4ka tyrkys)"],  # neskôr: "Svetlá", "Tmavšia"
-    horizontal=True
-)
-theme = "blue"  # firemná
+# firemná schéma
+theme = "blue"
 
 st.divider()
 
-# --- tlačidlo ---
 if st.button("Generovať", use_container_width=True):
     try:
-        # kontrola vstupov
-        if not all([template, helper, src1, src2]):
-            st.error("Nahraj všetky štyri XLS(X) súbory (template, pomôcka, vstup1, vstup2).")
+        # kontrola vstupov (iba 2 vstupy od užívateľa)
+        if not all([src1, src2]):
+            st.error("Nahraj oba vstupy: 'Vstup 1 (pohyby)' a 'Vstup 2 (väzby)'.")
+            st.stop()
+
+        # načítaj fixné súbory z data/
+        template_bytes = load_file_bytes(TEMPLATE_PATH)
+        helper_bytes   = load_file_bytes(HELPER_PATH)
+        if not template_bytes:
+            st.error(f"Chýba template: `{TEMPLATE_PATH}`")
+            st.stop()
+        if not helper_bytes:
+            st.error(f"Chýba pomôcka: `{HELPER_PATH}`")
             st.stop()
 
         # načítaj logo (pevné)
-        logo_bytes = load_logo_bytes(DEFAULT_LOGO_PATH)
+        logo_bytes = load_file_bytes(DEFAULT_LOGO_PATH)
         if not logo_bytes:
             st.warning(f"Logo sa nepodarilo načítať z '{DEFAULT_LOGO_PATH}'. PDF sa vytvorí bez loga.")
 
-        # načítaj súbory do bytes
-        template_bytes = template.read()
-        helper_bytes   = helper.read()
-        src1_bytes     = src1.read()
-        src2_bytes     = src2.read()
+        # bytes z uploadov
+        src1_bytes = src1.read()
+        src2_bytes = src2.read()
 
         # vygeneruj XLS
         xls_bytes = generate_saldo_document(
@@ -99,7 +102,7 @@ if st.button("Generovať", use_container_width=True):
             use_container_width=True
         )
 
-        # ak treba, vygeneruj PDF
+        # vygeneruj PDF ak treba
         if export_choice in ("PDF", "Oboje"):
             pdf_bytes = generate_saldo_document(
                 template_bytes, helper_bytes, src1_bytes, src2_bytes,
