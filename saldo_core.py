@@ -78,15 +78,19 @@ def _insert_logo_xlsx(ws, logo_bytes: Optional[bytes]):
 
 # ---------- helpers (PDF) ----------
 def _register_fonts():
-    """Registruje DejaVu Sans (ak je v data/), inak padá na Helvetica."""
+    """Registruje DejaVu Sans (ak je v data/) a nastaví family mapovanie; inak padá na Helvetica."""
     try:
         import os
+        from reportlab.lib.fonts import addMapping
         base = os.path.dirname(__file__)
         ttf_regular = os.path.join(base, "data", "DejaVuSans.ttf")
         ttf_bold    = os.path.join(base, "data", "DejaVuSans-Bold.ttf")
         if os.path.exists(ttf_regular) and os.path.exists(ttf_bold):
             pdfmetrics.registerFont(TTFont("DejaVuSans", ttf_regular))
             pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", ttf_bold))
+            # mapovanie rodiny: (family_name, bold, italic, font_name)
+            addMapping("DejaVuSans", 0, 0, "DejaVuSans")       # regular
+            addMapping("DejaVuSans", 1, 0, "DejaVuSans-Bold")  # bold
             return ("DejaVuSans", "DejaVuSans-Bold")
     except Exception:
         pass
@@ -187,13 +191,11 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
 
-    # Hlavička s logom vľavo, text vpravo
+    # Hlavička s logom vľavo, text vpravo (firma je pevne "SWAN a.s.")
     title = Paragraph("Náhľad na fakturačný účet – saldo", styles["HdrTitle"])
     date_p = Paragraph(f"Dátum generovania: {_dt.datetime.now().strftime('%d.%m.%Y')}", styles["Base"])
     meta = Paragraph(
-        f"SWAN a.s. — <font name='{FONT_BOLD}'>Meno:</font> {hdr_meno} • "
-        f"<font name='{FONT_BOLD}    '>SAP ID:</font> {hdr_sap} • "
-        f"<font name='{FONT_BOLD}'>Zmluvný účet:</font> {hdr_ucet}",
+        f"SWAN a.s. — <b>Meno:</b> {hdr_meno} • <b>SAP ID:</b> {hdr_sap} • <b>Zmluvný účet:</b> {hdr_ucet}",
         styles["Base"]
     )
 
