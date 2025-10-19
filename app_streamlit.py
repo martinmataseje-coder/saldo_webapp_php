@@ -25,34 +25,49 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# --- Pomocné: vymazať polia (podľa typu widgetu) ---
+# --- init session defaults ---
+if "reset_counter" not in st.session_state:
+    st.session_state.reset_counter = 0
+if "hdr_meno" not in st.session_state:
+    st.session_state.hdr_meno = ""
+if "hdr_sap" not in st.session_state:
+    st.session_state.hdr_sap = ""
+if "hdr_ucet" not in st.session_state:
+    st.session_state.hdr_ucet = ""
+if "theme" not in st.session_state:
+    st.session_state.theme = "blue"
+if "auto_clear" not in st.session_state:
+    st.session_state.auto_clear = True
+
+# --- Pomocné: vymazať polia (bez priameho zápisu do file_uploaderov) ---
 def clear_inputs():
-    # uploadery
-    st.session_state["src1"] = None
-    st.session_state["src2"] = None
     # text inputs
-    st.session_state["hdr_meno"] = ""
-    st.session_state["hdr_sap"]  = ""
-    st.session_state["hdr_ucet"] = ""
+    st.session_state.hdr_meno = ""
+    st.session_state.hdr_sap  = ""
+    st.session_state.hdr_ucet = ""
     # voľby
-    st.session_state["theme"] = "blue"
-    st.session_state["auto_clear"] = True
+    st.session_state.theme = "blue"
+    st.session_state.auto_clear = True
+    # resetni uploader widgety zvýšením tokenu
+    st.session_state.reset_counter += 1
 
 # --- Uploady (len 2 vstupy) ---
+# VŠIMNI SI: kľúče majú suffix reset_counter, aby sa po resete vytvorili nanovo (a tým sa vyprázdnili)
+rc = st.session_state.reset_counter
 with st.container():
     colA, colB = st.columns(2)
     with colA:
         src1 = st.file_uploader(
             "Vstup 1 (pohyby)",
             type=["xlsx"],
-            key="src1",
+            key=f"src1_{rc}",
             help="Nahraj XLSX s položkami/pohybmi."
         )
     with colB:
         src2 = st.file_uploader(
             "Vstup 2 (väzby)",
             type=["xlsx"],
-            key="src2",
+            key=f"src2_{rc}",
             help="Nahraj XLSX, kde je 'Doplnková referencia' (stĺpec G)."
         )
 
@@ -62,10 +77,10 @@ st.divider()
 # --- Textové polia (bez spoločnosti – tá je fixne 'SWAN a.s.') ---
 col1, col2 = st.columns(2)
 with col1:
-    hdr_meno = st.text_input("Meno zákazníka", value="", key="hdr_meno", placeholder="napr. Jožko Mrkvička")
-    hdr_sap  = st.text_input("SAP ID",         value="", key="hdr_sap",  placeholder="napr. 1090989")
+    hdr_meno = st.text_input("Meno zákazníka", key="hdr_meno", placeholder="napr. Jožko Mrkvička")
+    hdr_sap  = st.text_input("SAP ID",         key="hdr_sap",  placeholder="napr. 1090989")
 with col2:
-    hdr_ucet = st.text_input("Zmluvný účet",   value="", key="hdr_ucet", placeholder="napr. 777777777")
+    hdr_ucet = st.text_input("Zmluvný účet",   key="hdr_ucet", placeholder="napr. 777777777")
 
 # pevná spoločnosť
 hdr_spol = "SWAN a.s."
@@ -86,7 +101,7 @@ theme = st.radio(
 # Ovládanie vymazania polí
 col_reset_left, col_reset_right = st.columns([1, 1])
 with col_reset_left:
-    auto_clear = st.checkbox("Vymazať polia po generovaní", value=True, key="auto_clear")
+    auto_clear = st.checkbox("Vymazať polia po generovaní", key="auto_clear")
 with col_reset_right:
     if st.button("Vymazať polia teraz"):
         clear_inputs()
