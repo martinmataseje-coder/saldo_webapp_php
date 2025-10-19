@@ -124,23 +124,31 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     # fonty s diakritikou
     FONT_REG, FONT_BOLD = _register_fonts()
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="HdrTitle", parent=styles["Title"], fontName=FONT_BOLD))
-    styles.add(ParagraphStyle(name="Base", parent=styles["Normal"], fontName=FONT_REG, fontSize=9))
+    styles.add(ParagraphStyle(name="HdrTitle", parent=styles["Title"], fontName=FONT_BOLD, alignment=0))  # left
+    styles.add(ParagraphStyle(name="Base", parent=styles["Normal"], fontName=FONT_REG, fontSize=9, leading=12))
+    styles.add(ParagraphStyle(name="HdrSmall", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=9, alignment=1))  # header v bunke
+    styles.add(ParagraphStyle(name="Cell", parent=styles["Normal"], fontName=FONT_REG, fontSize=8, leading=10))
 
-    # hlavičky a indexy
-    headers = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
-    c_doc = _find_col(headers, "Číslo dokladu")
-    c_inv = _find_col(headers, "číslo Faktúry") or _find_col(headers, "Číslo Faktúry")
-    c_dz  = _find_col(headers, "Dátum zadania")
-    c_du  = _find_col(headers, "Dátum účtovania")
-    c_sn  = _find_col(headers, "Splatnosť netto")
-    c_typ = _find_col(headers, "Typ dokladu")
-    c_amt = _find_col(headers, "Čiastka")
-    c_bal = _find_col(headers, "Zostatok")
+    # pôvodné hlavičky v xlsx
+    xhdrs = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
+    c_doc = _find_col(xhdrs, "Číslo dokladu")
+    c_inv = _find_col(xhdrs, "číslo Faktúry") or _find_col(xhdrs, "Číslo Faktúry")
+    c_dz  = _find_col(xhdrs, "Dátum zadania")
+    c_du  = _find_col(xhdrs, "Dátum účtovania")
+    c_sn  = _find_col(xhdrs, "Splatnosť netto")
+    c_typ = _find_col(xhdrs, "Typ dokladu")
+    c_amt = _find_col(xhdrs, "Čiastka")
+    c_bal = _find_col(xhdrs, "Zostatok")
     last  = _last_data_row(ws, c_doc)
 
-    # dáta + priebežný zostatok + súčet
-    data = [headers]
+    # kratšie hlavičky pre PDF (iba vizuálne)
+    pdf_hdrs = [
+        "Č. dokladu", "Č. faktúry", "Dátum zadania", "Dátum účt.", "Splatnosť",
+        "Typ dokladu", "Čiastka", "Zostatok"
+    ]
+
+    # údaje tabuľky – prepočítaj zostatok v Pythone
+    data = [[Paragraph(h, styles["HdrSmall"]) for h in pdf_hdrs]]
     run_bal = 0.0
     sum_amt = 0.0
     def _is_faktura(txt): return isinstance(txt, str) and txt.strip().lower() == "faktúra"
@@ -159,76 +167,88 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
         sum_amt += add_amt
 
         row = [
-            "" if doc is None else str(doc),
-            "" if (inv is None or not _is_faktura(typ)) else str(inv),
-            _fmt_date(dz),
-            _fmt_date(du),
-            _fmt_date(sn),
-            "" if typ is None else str(typ),
-            "" if amt is None else f"{amt:,.2f}".replace(",", " ").replace(" ", " "),
-            f"{run_bal:,.2f}".replace(",", " ").replace(" ", " "),
+            Paragraph("" if doc is None else str(doc), styles["Cell"]),
+            Paragraph("" if (inv is None or not _is_faktura(typ)) else str(inv), styles["Cell"]),
+            Paragraph(_fmt_date(dz), styles["Cell"]),
+            Paragraph(_fmt_date(du), styles["Cell"]),
+            Paragraph(_fmt_date(sn), styles["Cell"]),
+            Paragraph("" if typ is None else str(typ), styles["Cell"]),
+            Paragraph("" if amt is None else f"{amt:,.2f}".replace(",", " ").replace(" ", " "), styles["Cell"]),
+            Paragraph(f"{run_bal:,.2f}".replace(",", " ").replace(" ", " "), styles["Cell"]),
         ]
         data.append(row)
 
-    # súčet
-    total_row = [""] * len(headers)
-    try:
-        total_row[c_typ-1] = "Súčet"
-        total_row[c_amt-1] = f"{sum_amt:,.2f}".replace(",", " ").replace(" ", " ")
-        total_row[c_bal-1] = f"{run_bal:,.2f}".replace(",", " ").replace(" ", " ")
-    except Exception:
-        pass
+    # súčet – posledný riadok
+    total_row = [Paragraph("", styles["Cell"]) for _ in range(8)]
+    total_row[5] = Paragraph("Súčet", styles["HdrSmall"])
+    total_row[6] = Paragraph(f"{sum_amt:,.2f}".replace(",", " ").replace(" ", " "), styles["HdrSmall"])
+    total_row[7] = Paragraph(f"{run_bal:,.2f}".replace(",", " ").replace(" ", " "), styles["HdrSmall"])
     data.append(total_row)
 
-    # PDF
+    # stránka
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
 
-    # horný header: logo + nadpis
-    header_cells = []
+    # HLAVIČKA: logo + titul a dátum, všetko vľavo
+    header_tbl_data = []
+    left_block = [
+        Paragraph("Náhľad na fakturačný účet – saldo", styles["HdrTitle"]),
+        Paragraph(f"Dátum generovania: {_dt.datetime.now().strftime('%d.%m.%Y')}", styles["Base"]),
+    ]
     if logo_bytes:
-        header_cells.append(RLImage(BytesIO(logo_bytes), width=120, height=120))
+        header_tbl_data.append([RLImage(BytesIO(logo_bytes), width=60, height=60), left_block])
+        col_widths = [68, None]
     else:
-        header_cells.append("")
+        header_tbl_data.append(["", left_block])
+        col_widths = [0, None]
 
-    title = Paragraph("<b>Náhľad na fakturačný účet – saldo</b>", styles["HdrTitle"])
-    date_line = Paragraph(f"Dátum generovania: {_dt.datetime.now().strftime('%d.%m.%Y')}", styles["Base"])
-    title_table = Table([[header_cells[0], title],
-                         ["", date_line]],
-                        colWidths=[130, None])
-    title_table.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    header_tbl = Table(header_tbl_data, colWidths=col_widths, hAlign="LEFT")
+    header_tbl.setStyle(TableStyle([
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
         ("LEFTPADDING", (0,0), (-1,-1), 0),
         ("RIGHTPADDING", (0,0), (-1,-1), 0),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+        ("TOPPADDING", (0,0), (-1,-1), 0),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
     ]))
 
-    meta  = Paragraph(
-        f"{hdr_spol} — Meno: <b>{hdr_meno}</b> • SAP ID: <b>{hdr_sap}</b> • Zmluvný účet: <b>{hdr_ucet}</b>",
+    # meta riadok – tučné labely
+    meta = Paragraph(
+        f"{hdr_spol} — <b>Meno:</b> {hdr_meno} • <b>SAP ID:</b> {hdr_sap} • <b>Zmluvný účet:</b> {hdr_ucet}",
         styles["Base"]
     )
 
-    story = [title_table, Spacer(1, 8), meta, Spacer(1, 10)]
+    story = [header_tbl, Spacer(1, 6), meta, Spacer(1, 10)]
 
-    table = Table(data, repeatRows=1)
+    # šírky stĺpcov (A4 portrait, fixné aby sa to zmestilo)
+    col_widths = [65, 65, 58, 58, 58, 68, 50, 55]
+
+    table = Table(data, repeatRows=1, colWidths=col_widths)
     table.setStyle(TableStyle([
-        ("FONT", (0,0), (-1,-1), FONT_REG),
-        ("FONT", (0,0), (-1,0),  FONT_BOLD),
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#25B3AD")), # tyrkys 4ka
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("ALIGN", (0,0), (-1,0), "CENTER"),
+        # hlavička
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor(header_hex)),
+        ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
+        ("ALIGN",       (0,0), (-1,0), "CENTER"),
 
+        # mriežka a zebra
         ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#D0D7E1")),
         ("ROWBACKGROUNDS", (0,1), (-1,-2), [colors.white, colors.HexColor("#F9FEFD")]),
 
+        # zarovnania dát
+        ("ALIGN", (2,1), (4,-2), "CENTER"),   # dátumy
+        ("ALIGN", (6,1), (7,-2), "RIGHT"),    # čísla
+
+        # typografia
         ("FONTSIZE", (0,0), (-1,0), 9),
         ("FONTSIZE", (0,1), (-1,-1), 8),
 
-        ("ALIGN", (2,1), (4,-2), "CENTER"),
-        ("ALIGN", (6,1), (7,-2), "RIGHT"),
+        # paddingy nech to nie je rozťahané
+        ("LEFTPADDING",  (0,0), (-1,-1), 2),
+        ("RIGHTPADDING", (0,0), (-1,-1), 2),
+        ("TOPPADDING",   (0,0), (-1,-1), 2),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 2),
 
-        # súčet – posledný riadok
-        ("FONT", (0,-1), (-1,-1), FONT_BOLD),
+        # posledný riadok – súčet
+        ("FONTNAME", (0,-1), (-1,-1), FONT_BOLD),
         ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#E8FBF7")),
         ("ALIGN", (6,-1), (7,-1), "RIGHT"),
     ]))
@@ -237,6 +257,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     doc.build(story)
     buf.seek(0)
     return buf.read()
+
 
 # ---------- public API ----------
 def generate_saldo_document(
