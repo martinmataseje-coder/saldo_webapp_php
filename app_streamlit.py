@@ -3,18 +3,37 @@ import datetime as dt
 from pathlib import Path
 import streamlit as st
 
-from saldo_core import generate_saldo_document  # <- dôležité: táto funkcia MUSÍ existovať v saldo_core.py
+from saldo_core import generate_saldo_document  # musí existovať v saldo_core.py
 
 st.set_page_config(page_title="Saldo generátor", page_icon="📄", layout="centered")
 st.title("Saldo – generátor")
 
-st.caption("Nahraj TEMPLATE, POMÔCKU a dva vstupy. Logo je voliteľné cez cestu k súboru.")
+st.caption(
+    "TEMPLATE a POMÔCKA sa načítajú automaticky z priečinka data/. "
+    "Používateľ nahráva iba vstupy (pohyby a väzby). Logo je voliteľné."
+)
 
-# ---- Uploady / vstupy ----
-template = st.file_uploader("TEMPLATE_saldo.xlsx", type=["xlsx"])
-helper   = st.file_uploader("pomocka_saldo.xlsx", type=["xlsx"])
-src1     = st.file_uploader("Vstupný súbor 1 (pohyby)", type=["xlsx"])
-src2     = st.file_uploader("Vstupný súbor 2 (väzby)", type=["xlsx"])
+# ---------- AUTO LOAD z data/ ----------
+TEMPLATE_PATH = Path("data/TEMPLATE_saldo.XLSX")
+HELPER_PATH   = Path("data/pomocka k saldo (vlookup).XLSX")
+
+missing = []
+if not TEMPLATE_PATH.exists(): missing.append(TEMPLATE_PATH.name)
+if not HELPER_PATH.exists():   missing.append(HELPER_PATH.name)
+if missing:
+    st.error(
+        "Chýbajú systémové súbory v priečinku data/: " + ", ".join(missing) +
+        ". Nahraj ich do data/ a skús znova."
+    )
+    st.stop()
+
+# Načítaj ich hneď do pamäte (aby sa dali použiť aj 2× pri 'Oboje')
+t_bytes = TEMPLATE_PATH.read_bytes()
+h_bytes = HELPER_PATH.read_bytes()
+
+# ---------- Uploady / vstupy ----------
+src1 = st.file_uploader("Vstupný súbor 1 (pohyby)", type=["xlsx"])
+src2 = st.file_uploader("Vstupný súbor 2 (väzby)", type=["xlsx"])
 
 colA, colB = st.columns(2)
 with colA:
@@ -28,55 +47,47 @@ col1, col2, col3 = st.columns(3)
 with col1:
     export_choice = st.radio("Exportovať ako", ["XLSX", "PDF", "Oboje"], horizontal=True, index=0)
 with col2:
-    theme = st.selectbox("Téma výstupu", ["blue", "gray", "warm"], index=0)
+    theme = st.selectbox("Téma výstupu", ["blue", "gray", "warm"], index=0)  # farba v XLS; PDF má 4ka tyrkys
 with col3:
+    # voliteľne si necháme aj textové pole (ak chceš natvrdo zadávať cestu); nebude to však rušiť
     logo_path = st.text_input("Cesta k logu (voliteľné)", value="data/logo_4ka_circle.png")
+
+# ---------- Logo (upload alebo auto-detect v data/) ----------
+logo_bytes = None
+logo_upload = st.file_uploader("Logo (voliteľné)", type=["png", "jpg", "jpeg"])
+if logo_upload:
+    logo_bytes = logo_upload.read()
+else:
+    candidates = []
+    if logo_path and logo_path.strip():
+        candidates.append(logo_path.strip())
+    candidates += [
+        "data/logo_4ka_circle.png",
+        "data/logo_4ka.png",
+        "data/logo.png",
+        "data/Logo_4ka.png",
+        "data/LOGO_4KA.PNG",
+    ]
+    for cand in candidates:
+        p = Path(cand)
+        if p.exists() and p.is_file():
+            try:
+                logo_bytes = p.read_bytes()
+                break
+            except Exception:
+                continue
+# ak sa nenašlo, ticho pokračujeme bez loga
 
 st.divider()
 
+# ---------- Generovanie ----------
 if st.button("Generovať", use_container_width=True):
-    # Kontroly vstupov
-    missing = []
-    if not template: missing.append("TEMPLATE")
-    if not helper:   missing.append("POMÔCKA")
-    if not src1:     missing.append("Vstup 1 (pohyby)")
-    if not src2:     missing.append("Vstup 2 (väzby)")
-    if missing:
-        st.error("Chýbajú súbory: " + ", ".join(missing))
+    if not src1 or not src2:
+        st.error("Nahraj oba vstupy: Vstup 1 (pohyby) a Vstup 2 (väzby).")
         st.stop()
 
-    # Načítaj všetky uploady do pamäte (aby sa dali použiť viackrát)
-    t_bytes = template.read()
-    h_bytes = helper.read()
     s1_bytes = src1.read()
     s2_bytes = src2.read()
-
-  # --- Logo bytes (voliteľné; bez zbytočných hlášok) ---
-logo_bytes = None
-
-candidates = []
-# 1) ak používateľ zadal cestu, skúsi ju ako prvú
-if logo_path and logo_path.strip():
-    candidates.append(logo_path.strip())
-
-# 2) fallback: bežné názvy v data/
-candidates += [
-    "data/logo_4ka_circle.png",
-    "data/logo_4ka.png",
-    "data/logo.png",
-    "data/Logo_4ka.png",
-    "data/LOGO_4KA.PNG",
-]
-
-for cand in candidates:
-    p = Path(cand)
-    if p.exists() and p.is_file():
-        try:
-            logo_bytes = p.read_bytes()
-            break
-        except Exception:
-            continue
-# ak sa nič nenašlo, logo_bytes ostane None a appka pokračuje bez loga
 
     safe_name = (hdr_meno or "report").strip().replace(" ", "_")
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -128,4 +139,4 @@ for cand in candidates:
             use_container_width=True,
         )
 
-    st.caption("Dáta sa spracujú iba v pamäti a neukladajú sa na server.")
+    st.caption("Dáta (vstupy) sa spracujú iba v pamäti a neukladajú sa na server.")
