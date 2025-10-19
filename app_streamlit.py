@@ -25,35 +25,73 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# --- UI vstupy ---
+# --- Pomocné: vymazať polia ---
+def clear_inputs():
+    for k in ("hdr_meno", "hdr_sap", "hdr_ucet", "hdr_spol"):
+        if k in st.session_state:
+            st.session_state[k] = ""
+    for k in ("src1", "src2"):
+        if k in st.session_state:
+            st.session_state[k] = None
+
+# --- Uploady (len 2 vstupy) ---
 with st.container():
     colA, colB = st.columns(2)
     with colA:
-        src1 = st.file_uploader("Vstup 1 (pohyby)", type=["xlsx"])
+        src1 = st.file_uploader("Vstup 1 (pohyby)", type=["xlsx"], key="src1", help="Nahraj XLSX s položkami/pohybmi.")
     with colB:
-        src2 = st.file_uploader("Vstup 2 (väzby)", type=["xlsx"])
+        src2 = st.file_uploader("Vstup 2 (väzby)", type=["xlsx"], key="src2", help="Nahraj XLSX, kde je 'Doplnková referencia' (stĺpec G).")
 
 st.caption("Template a Pomôcka sa načítajú automaticky z priečinka `data/`.")
 st.divider()
 
+# --- Textové polia BEZ predvyplnenia (iba placeholdery) ---
 col1, col2 = st.columns(2)
 with col1:
-    hdr_meno = st.text_input("Meno zákazníka", "Jožko Mrkvička")
-    hdr_sap  = st.text_input("SAP ID", "1090989")
+    hdr_meno = st.text_input("Meno zákazníka", value="", key="hdr_meno", placeholder="napr. Jožko Mrkvička")
+    hdr_sap  = st.text_input("SAP ID",         value="", key="hdr_sap",  placeholder="napr. 1090989")
 with col2:
-    hdr_ucet = st.text_input("Zmluvný účet", "777777777")
-    hdr_spol = st.text_input("Názov spoločnosti", "SWAN a.s.")
+    hdr_ucet = st.text_input("Zmluvný účet",   value="", key="hdr_ucet", placeholder="napr. 777777777")
+    hdr_spol = st.text_input("Názov spoločnosti", value="", key="hdr_spol", placeholder="napr. SWAN a.s.")
 
-# firemná schéma
-theme = "blue"
+# Výber farebnej schémy PDF/XLS
+theme = st.radio(
+    "Farebná schéma výstupu:",
+    ["blue", "gray", "warm"],
+    format_func=lambda x: {
+        "blue": "Firemná (4ka tyrkys)",
+        "gray": "Svetlá (sivá)",
+        "warm": "Teplá (béžová)"
+    }[x],
+    horizontal=True
+)
+
+# Ovládanie vymazania polí
+col_reset_left, col_reset_right = st.columns([1,1])
+with col_reset_left:
+    auto_clear = st.checkbox("Vymazať polia po generovaní", value=True)
+with col_reset_right:
+    if st.button("Vymazať polia teraz"):
+        clear_inputs()
+        st.info("Polia boli vymazané.")
+        st.stop()
 
 st.divider()
 
-# Vždy generujeme OBOJE (XLS aj PDF) – žiadny výber formátu
+# Vždy generujeme OBOJE (XLS aj PDF)
 if st.button("Generovať", use_container_width=True):
     try:
-        if not all([src1, src2]):
-            st.error("Nahraj oba vstupy: 'Vstup 1 (pohyby)' a 'Vstup 2 (väzby)'.")
+        # validácia vstupov (povinné)
+        missing = []
+        if not src1: missing.append("Vstup 1 (pohyby)")
+        if not src2: missing.append("Vstup 2 (väzby)")
+        if not hdr_meno.strip(): missing.append("Meno zákazníka")
+        if not hdr_sap.strip():  missing.append("SAP ID")
+        if not hdr_ucet.strip(): missing.append("Zmluvný účet")
+        if not hdr_spol.strip(): missing.append("Názov spoločnosti")
+
+        if missing:
+            st.error("Doplň povinné polia: " + ", ".join(missing))
             st.stop()
 
         # načítaj fixné súbory z data/
@@ -76,7 +114,7 @@ if st.button("Generovať", use_container_width=True):
         src2_bytes = src2.read()
 
         # cesty na uloženie
-        safe_name = (hdr_meno or "report").strip().replace(" ", "_")
+        safe_name = hdr_meno.strip().replace(" ", "_")
         ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         out_dir = "data"
         os.makedirs(out_dir, exist_ok=True)
@@ -86,7 +124,7 @@ if st.button("Generovať", use_container_width=True):
         # ===== XLS =====
         xls_bytes = generate_saldo_document(
             template_bytes, helper_bytes, src1_bytes, src2_bytes,
-            hdr_meno=hdr_meno, hdr_sap=hdr_sap, hdr_ucet=hdr_ucet, hdr_spol=hdr_spol,
+            hdr_meno=hdr_meno.strip(), hdr_sap=hdr_sap.strip(), hdr_ucet=hdr_ucet.strip(), hdr_spol=hdr_spol.strip(),
             theme=theme, logo_bytes=logo_bytes, output="xlsx"
         )
         with open(xls_path, "wb") as f:
@@ -96,14 +134,14 @@ if st.button("Generovať", use_container_width=True):
         # ===== PDF =====
         pdf_bytes = generate_saldo_document(
             template_bytes, helper_bytes, src1_bytes, src2_bytes,
-            hdr_meno=hdr_meno, hdr_sap=hdr_sap, hdr_ucet=hdr_ucet, hdr_spol=hdr_spol,
+            hdr_meno=hdr_meno.strip(), hdr_sap=hdr_sap.strip(), hdr_ucet=hdr_ucet.strip(), hdr_spol=hdr_spol.strip(),
             theme=theme, logo_bytes=logo_bytes, output="pdf"
         )
         with open(pdf_path, "wb") as f:
             f.write(pdf_bytes)
         st.success(f"✅ PDF vygenerované: {pdf_path}")
 
-        # ===== tlačidlá na stiahnutie =====
+        # ===== sťahovanie =====
         st.write("### Stiahnuť výstupy")
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
@@ -122,6 +160,11 @@ if st.button("Generovať", use_container_width=True):
                 mime="application/pdf",
                 use_container_width=True
             )
+
+        # Auto-clear po úspešnom generovaní (ak je zapnuté)
+        if auto_clear:
+            clear_inputs()
+            st.info("Polia boli vymazané (podľa nastavenia).")
 
     except Exception as e:
         st.error("Pri generovaní nastala chyba.")
