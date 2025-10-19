@@ -36,24 +36,22 @@ def reset_ui():
 rc = st.session_state.reset_counter  # použije sa v kľúčoch widgetov
 
 # --- Uploady (len 2 vstupy) ---
-with st.container():
-    colA, colB = st.columns(2)
-    with colA:
-        src1 = st.file_uploader(
-            "Vstup 1 (pohyby)",
-            type=["xlsx"],
-            key=f"src1_{rc}",
-            help="Nahraj XLSX s položkami/pohybmi."
-        )
-    with colB:
-        src2 = st.file_uploader(
-            "Vstup 2 (väzby)",
-            type=["xlsx"],
-            key=f"src2_{rc}",
-            help="Nahraj XLSX, kde je 'Doplnková referencia' (stĺpec G)."
-        )
+colA, colB = st.columns(2)
+with colA:
+    src1 = st.file_uploader(
+        "Vstup 1 (pohyby)",
+        type=["xlsx"],
+        key=f"src1_{rc}",
+        help="Nahraj XLSX s položkami/pohybmi."
+    )
+with colB:
+    src2 = st.file_uploader(
+        "Vstup 2 (väzby)",
+        type=["xlsx"],
+        key=f"src2_{rc}",
+        help="Nahraj XLSX, kde je 'Doplnková referencia' (stĺpec G)."
+    )
 
-st.caption("Template a Pomôcka sa načítajú automaticky z priečinka `data/`.")
 st.divider()
 
 # --- Textové polia ---
@@ -142,7 +140,6 @@ if st.button("Generovať", use_container_width=True, key=f"gen_{rc}"):
         )
 
         # --- Download ---
-        st.info("Výstupy sa **neukladajú**. Stiahni si XLS/PDF nižšie pred Resetom alebo zatvorením okna.", icon="⚠️")
         st.write("### Stiahnuť výstupy")
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
