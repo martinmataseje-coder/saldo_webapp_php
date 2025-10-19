@@ -191,8 +191,8 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     title = Paragraph("Náhľad na fakturačný účet – saldo", styles["HdrTitle"])
     date_p = Paragraph(f"Dátum generovania: {_dt.datetime.now().strftime('%d.%m.%Y')}", styles["Base"])
     meta = Paragraph(
-        f"{hdr_spol} — <font name='{FONT_BOLD}'>Meno:</font> {hdr_meno} • "
-        f"<font name='{FONT_BOLD}'>SAP ID:</font> {hdr_sap} • "
+        f"SWAN a.s. — <font name='{FONT_BOLD}'>Meno:</font> {hdr_meno} • "
+        f"<font name='{FONT_BOLD}    '>SAP ID:</font> {hdr_sap} • "
         f"<font name='{FONT_BOLD}'>Zmluvný účet:</font> {hdr_ucet}",
         styles["Base"]
     )
