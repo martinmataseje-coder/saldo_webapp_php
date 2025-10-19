@@ -93,7 +93,7 @@ def _register_fonts():
         base = os.path.dirname(__file__)
         ttf_regular = os.path.join(base, "data", "DejaVuSans.ttf")
         ttf_bold    = os.path.join(base, "data", "DejaVuSans-Bold.ttf")
-        if os.path.exists(ttf_regular) and os.path.exists(ttf_bold)):
+        if os.path.exists(ttf_regular) and os.path.exists(ttf_bold):
             pdfmetrics.registerFont(TTFont("DejaVuSans", ttf_regular))
             pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", ttf_bold))
             return ("DejaVuSans", "DejaVuSans-Bold")
