@@ -120,6 +120,12 @@ def _num(v):
     except Exception:
         return None
 
+def _fmt_money(x):
+    if x is None:
+        return ""
+    s = f"{x:,.2f}".replace(",", " ")   # tisícky medzerou
+    return s + "\u00A0€"                # nedeliteľná medzera + €
+
 def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[bytes], header_hex="#25B3AD"):
     # fonty s diakritikou
     FONT_REG, FONT_BOLD = _register_fonts()
@@ -173,17 +179,16 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
             Paragraph(_fmt_date(du), styles["Cell"]),
             Paragraph(_fmt_date(sn), styles["Cell"]),
             Paragraph("" if typ is None else str(typ), styles["Cell"]),
-            Paragraph("" if amt is None else f"{amt:,.2f} €".replace(",", " ").replace(" ", " "), styles["Cell"]),
-            Paragraph(f"{run_bal:,.2f} €".replace(",", " ").replace(" ", " "), styles["Cell"]),
-
+            Paragraph(_fmt_money(amt), styles["Cell"]),
+            Paragraph(_fmt_money(run_bal), styles["Cell"]),
         ]
         data.append(row)
 
     # súčet – posledný riadok
     total_row = [Paragraph("", styles["Cell"]) for _ in range(8)]
     total_row[5] = Paragraph("Súčet", styles["HdrSmall"])
-    total_row[6] = Paragraph(f"{sum_amt:,.2f}".replace(",", " ").replace(" ", " "), styles["HdrSmall"])
-    total_row[7] = Paragraph(f"{run_bal:,.2f}".replace(",", " ").replace(" ", " "), styles["HdrSmall"])
+    total_row[6] = Paragraph(_fmt_money(sum_amt), styles["HdrSmall"])
+    total_row[7] = Paragraph(_fmt_money(run_bal), styles["HdrSmall"])
     data.append(total_row)
 
     # stránka
@@ -198,12 +203,12 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     ]
     if logo_bytes:
         header_tbl_data.append([RLImage(BytesIO(logo_bytes), width=60, height=60), left_block])
-        col_widths = [68, None]
+        col_head_widths = [68, None]
     else:
         header_tbl_data.append(["", left_block])
-        col_widths = [0, None]
+        col_head_widths = [0, None]
 
-    header_tbl = Table(header_tbl_data, colWidths=col_widths, hAlign="LEFT")
+    header_tbl = Table(header_tbl_data, colWidths=col_head_widths, hAlign="LEFT")
     header_tbl.setStyle(TableStyle([
         ("VALIGN", (0,0), (-1,-1), "TOP"),
         ("LEFTPADDING", (0,0), (-1,-1), 0),
@@ -212,25 +217,27 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
         ("BOTTOMPADDING", (0,0), (-1,-1), 4),
     ]))
 
-   # meta riadok – labely skutočne bold (vlastný štýl)
-meta_style = ParagraphStyle(
-    "Meta",
-    parent=styles["Base"],
-    fontName=FONT_REG,
-    fontSize=9,
-    leading=12
-)
+    # meta riadok – labely skutočne bold (vlastný štýl)
+    meta_style = ParagraphStyle(
+        "Meta",
+        parent=styles["Base"],
+        fontName=FONT_REG,
+        fontSize=9,
+        leading=12
+    )
 
-meta_text = (
-    f"{hdr_spol} — "
-    f"<font name='{FONT_BOLD}'>Meno:</font> {hdr_meno} • "
-    f"<font name='{FONT_BOLD}'>SAP ID:</font> {hdr_sap} • "
-    f"<font name='{FONT_BOLD}'>Zmluvný účet:</font> {hdr_ucet}"
-)
+    meta_text = (
+        f"{hdr_spol} — "
+        f"<font name='{FONT_BOLD}'>Meno:</font> {hdr_meno} • "
+        f"<font name='{FONT_BOLD}'>SAP ID:</font> {hdr_sap} • "
+        f"<font name='{FONT_BOLD}'>Zmluvný účet:</font> {hdr_ucet}"
+    )
 
-meta = Paragraph(meta_text, meta_style)
+    meta = Paragraph(meta_text, meta_style)
 
-    # šírky stĺpcov (A4 portrait, fixné aby sa to zmestilo)
+    story = [header_tbl, Spacer(1, 6), meta, Spacer(1, 10)]
+
+    # šírky stĺpcov (upravené podľa testu – širší prvý stĺpec)
     col_widths = [75, 60, 58, 58, 58, 68, 50, 55]
 
     table = Table(data, repeatRows=1, colWidths=col_widths)
@@ -247,6 +254,7 @@ meta = Paragraph(meta_text, meta_style)
         # zarovnania dát
         ("ALIGN", (2,1), (4,-2), "CENTER"),   # dátumy
         ("ALIGN", (6,1), (7,-2), "RIGHT"),    # čísla
+        ("ALIGN", (6,-1), (7,-1), "RIGHT"),   # aj riadok Súčet
 
         # typografia
         ("FONTSIZE", (0,0), (-1,0), 9),
@@ -261,7 +269,6 @@ meta = Paragraph(meta_text, meta_style)
         # posledný riadok – súčet
         ("FONTNAME", (0,-1), (-1,-1), FONT_BOLD),
         ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#E8FBF7")),
-        ("ALIGN", (6,-1), (7,-1), "RIGHT"),
     ]))
 
     story.append(table)
