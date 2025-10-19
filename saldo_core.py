@@ -188,11 +188,11 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     # súčet – posledný riadok
     total_row = [Paragraph("", styles["Cell"]) for _ in range(8)]
     total_row[5] = Paragraph("Súčet", styles["HdrSmall"])
-    total_row[6] = Paragraph(_fmt_money(sum_amt), styles["HdrSmall"])
-    total_row[7] = Paragraph(_fmt_money(run_bal), styles["HdrSmall"])
+    total_row[6] = Paragraph(_fmt_money(sum_amt), styles["CellRight"])
+    total_row[7] = Paragraph(_fmt_money(run_bal), styles["CellRight"])
     data.append(total_row)
 
-    # stránka    
+    # stránka
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
 
