@@ -12,7 +12,7 @@ from openpyxl.drawing.image import Image as XLImage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -126,6 +126,52 @@ def _fmt_money(x):
     s = f"{x:,.2f}".replace(",", " ")   # tisícky medzerou
     return s + "\u00A0€"                # nedeliteľná medzera + €
 
+# --- LOGO auto-crop (bez NumPy; len Pillow) ---
+def _autocrop_logo_bytes(logo_bytes: bytes, bg_tolerance: int = 22) -> bytes:
+    """
+    Odstráni jednotný okraj loga (sivý/biely), pozadie spraví transparentné
+    a orez vráti ako PNG bytes. Ak Pillow nie je k dispozícii, vráti pôvodné bytes.
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        return logo_bytes
+
+    import io
+    im = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+
+    # farba pozadia z rohu
+    bg = im.getpixel((0, 0))[:3]
+
+    pix = im.load()
+    w, h = im.size
+
+    # sprav transparentné pozadie pre pixely podobné rohovému pozadiu
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = pix[x, y]
+            if abs(r - bg[0]) <= bg_tolerance and abs(g - bg[1]) <= bg_tolerance and abs(b - bg[2]) <= bg_tolerance:
+                pix[x, y] = (r, g, b, 0)
+            else:
+                pix[x, y] = (r, g, b, 255)
+
+    # orež podľa alfa kanálu
+    bbox = im.getbbox()
+    if not bbox:
+        return logo_bytes
+    cropped = im.crop(bbox)
+
+    out = io.BytesIO()
+    cropped.save(out, format="PNG")
+    out.seek(0)
+    return out.read()
+
+def _make_rl_image_from_bytes(logo_bytes: bytes, target_px: int = 60):
+    """Vytvor RL image (štvorec) z PNG bytes."""
+    from reportlab.platypus import Image as RLImage
+    from io import BytesIO
+    return RLImage(BytesIO(logo_bytes), width=target_px, height=target_px)
+
 def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[bytes], header_hex="#25B3AD"):
     # fonty s diakritikou
     FONT_REG, FONT_BOLD = _register_fonts()
@@ -196,18 +242,24 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
 
-    # HLAVIČKA: logo + titul a dátum, všetko vľavo
+    # HLAVIČKA: logo (autocrop) + 10pt medzera + text, všetko vľavo
     header_tbl_data = []
     left_block = [
         Paragraph("Náhľad na fakturačný účet – saldo", styles["HdrTitle"]),
         Paragraph(f"Dátum generovania: {_dt.datetime.now().strftime('%d.%m.%Y')}", styles["Base"]),
     ]
     if logo_bytes:
-        header_tbl_data.append([RLImage(BytesIO(logo_bytes), width=60, height=60), left_block])
-        col_head_widths = [68, None]
+        try:
+            logo_cropped = _autocrop_logo_bytes(logo_bytes)
+            rlimg = _make_rl_image_from_bytes(logo_cropped, target_px=60)
+            header_tbl_data.append([rlimg, "", left_block])
+            col_head_widths = [60, 10, None]  # 10pt medzera
+        except Exception:
+            header_tbl_data.append(["", "", left_block])
+            col_head_widths = [0, 0, None]
     else:
-        header_tbl_data.append(["", left_block])
-        col_head_widths = [0, None]
+        header_tbl_data.append(["", "", left_block])
+        col_head_widths = [0, 0, None]
 
     header_tbl = Table(header_tbl_data, colWidths=col_head_widths, hAlign="LEFT")
     header_tbl.setStyle(TableStyle([
