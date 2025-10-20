@@ -41,12 +41,12 @@ def _style_ws(ws, c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal, last, the
     thin = Side(style="thin", color="D0D7E1")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # hlavička
+    # hlavička (zapni zalamovanie textu)
     for c in range(1, ws.max_column+1):
         cell = ws.cell(row=HEADER_ROW, column=c)
         cell.font = head_font
         cell.fill = header_fill
-        cell.alignment = Alignment(vertical="center", horizontal="center")
+        cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
         cell.border = border
 
     widths = {c_doc:16, c_inv:18, c_dz:14, c_du:16, c_sn:16, c_typ:22, c_amt:14, c_bal:14}
@@ -143,7 +143,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     xhdrs = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
     c_doc = _find_col(xhdrs, "Číslo dokladu")
     c_inv = _find_col(xhdrs, "číslo Faktúry") or _find_col(xhdrs, "Číslo Faktúry")
-    c_dz  = _find_col(xhdrs, "Dátum zadania")
+    c_dz  = _find_col(xhdrs, "Dátum vystavenia /\nPripísania platby") or _find_col(xhdrs, "Dátum zadania")
     c_du  = _find_col(xhdrs, "Dátum účtovania")
     c_sn  = _find_col(xhdrs, "Splatnosť netto")
     c_typ = _find_col(xhdrs, "Typ dokladu")
@@ -151,8 +151,17 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     c_bal = _find_col(xhdrs, "Zostatok")
     last  = _last_data_row(ws, c_doc)
 
-    pdf_hdrs = ["Č. dokladu", "Č. faktúry", "Dátum zadania", "Dátum účt.", "Splatnosť",
-                "Typ dokladu", "Čiastka", "Zostatok"]
+    # PDF hlavičky (aktualizované)
+    pdf_hdrs = [
+        "Č. dokladu",
+        "Č. faktúry",
+        "Dátum vystavenia /\nPripísania platby",
+        "Dátum účt.",
+        "Splatnosť",
+        "Typ dokladu",
+        "Čiastka",
+        "Zostatok",
+    ]
 
     data = [[Paragraph(h, styles["HdrSmall"]) for h in pdf_hdrs]]
     run_bal = 0.0
@@ -174,7 +183,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
             Paragraph("" if (inv is None or not _is_faktura(typ)) else str(inv), styles["Cell"]),
             Paragraph(_fmt_date(dz), styles["Cell"]),
             Paragraph(_fmt_date(du), styles["Cell"]),
-            Paragraph(_fmt_date(sn), styles["Cell"]),
+            Paragraph(_fmt_date(sn) if _is_faktura(typ) else "", styles["Cell"]),
             Paragraph("" if typ is None else str(typ), styles["Cell"]),
             Paragraph(_fmt_money(amt), styles["CellRight"]),
             Paragraph(_fmt_money(run_bal), styles["CellRight"]),
@@ -275,7 +284,7 @@ def generate_saldo_document(
     headers = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
     c_doc = _find_col(headers, "Číslo dokladu")
     c_inv = _find_col(headers, "číslo Faktúry") or _find_col(headers, "Číslo Faktúry")
-    c_dz  = _find_col(headers, "Dátum zadania")
+    c_dz  = _find_col(headers, "Dátum zadania") or _find_col(headers, "Dátum vystavenia /\nPripísania platby")
     c_du  = _find_col(headers, "Dátum účtovania")
     c_sn  = _find_col(headers, "Splatnosť netto")
     c_typ = _find_col(headers, "Typ dokladu")
@@ -283,6 +292,13 @@ def generate_saldo_document(
     c_bal = _find_col(headers, "Zostatok")
     if None in (c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal):
         raise RuntimeError("V TEMPLATE chýba niektorý povinný stĺpec.")
+
+    # Premenuj hlavičku „Dátum zadania“ -> „Dátum vystavenia /\nPripísania platby“ a zapni wrap (rob až po nájdení indexov)
+    if c_dz:
+        hdr_cell = ws.cell(row=HEADER_ROW, column=c_dz)
+        hdr_cell.value = "Dátum vystavenia /\nPripísania platby"
+        # wrap text a centrovanie
+        hdr_cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
 
     # --- HELPER (pomôcka) ---
     wb_h = load_workbook(BytesIO(helper_bytes), data_only=True); ws_h = wb_h[wb_h.sheetnames[0]]
@@ -325,10 +341,18 @@ def generate_saldo_document(
             continue
         ozn_pov = ws1.cell(row=r, column=i_op).value if i_op else None
         mapped_typ = pom_map.get(ozn_pov.strip() if isinstance(ozn_pov, str) else ozn_pov, None)
+
+        # plnenie štandardných polí
         ws.cell(row=r0, column=c_doc, value=ws1.cell(row=r, column=i_doc).value if i_doc else None)
         ws.cell(row=r0, column=c_dz,  value=ws1.cell(row=r, column=i_dz).value if i_dz else None)
         ws.cell(row=r0, column=c_du,  value=ws1.cell(row=r, column=i_du).value if i_du else None)
-        ws.cell(row=r0, column=c_sn,  value=ws1.cell(row=r, column=i_sn).value if i_sn else None)
+
+        # Splatnosť len pri faktúrach, inak None
+        if mapped_typ and isinstance(mapped_typ, str) and mapped_typ.strip().lower() == "faktúra":
+            ws.cell(row=r0, column=c_sn, value=ws1.cell(row=r, column=i_sn).value if i_sn else None)
+        else:
+            ws.cell(row=r0, column=c_sn, value=None)
+
         ws.cell(row=r0, column=c_typ, value=mapped_typ if mapped_typ is not None else None)
         ws.cell(row=r0, column=c_amt, value=ws1.cell(row=r, column=i_amt).value if i_amt else None)
         r0 += 1
