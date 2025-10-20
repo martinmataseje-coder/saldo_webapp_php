@@ -2,6 +2,7 @@
 from io import BytesIO
 from typing import Literal, Optional
 import datetime as _dt
+import unicodedata  # <- robustné porovnávanie textu
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -20,9 +21,19 @@ HEADER_ROW = 9
 DATE_FMT   = "DD.MM.YY"
 
 # ---------- helpers (xlsx) ----------
+def _norm(s):
+    """Normalizácia stringu: odstráni NBSP, diakritiku, oreže medzery a zníži na lower()."""
+    if s is None:
+        return ""
+    s = str(s).replace("\u00A0", " ")  # NBSP -> space
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return s.strip().lower()
+
 def _find_col(headers, name):
+    target = _norm(name)
     for i, h in enumerate(headers, start=1):
-        if isinstance(h, str) and h.strip() == name:
+        if _norm(h) == target:
             return i
     return None
 
@@ -49,7 +60,7 @@ def _style_ws(ws, c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal, last, the
         cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
         cell.border = border
 
-    widths = {c_doc:16, c_inv:18, c_dz:14, c_du:16, c_sn:16, c_typ:22, c_amt:14, c_bal:14}
+    widths = {c_doc:16, c_inv:18, c_dz:18, c_du:16, c_sn:16, c_typ:22, c_amt:14, c_bal:14}
     for col_idx, w in widths.items():
         if col_idx:
             ws.column_dimensions[get_column_letter(col_idx)].width = w
@@ -88,9 +99,8 @@ def _register_fonts():
         if os.path.exists(ttf_regular) and os.path.exists(ttf_bold):
             pdfmetrics.registerFont(TTFont("DejaVuSans", ttf_regular))
             pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", ttf_bold))
-            # mapovanie rodiny: (family_name, bold, italic, font_name)
-            addMapping("DejaVuSans", 0, 0, "DejaVuSans")       # regular
-            addMapping("DejaVuSans", 1, 0, "DejaVuSans-Bold")  # bold
+            addMapping("DejaVuSans", 0, 0, "DejaVuSans")
+            addMapping("DejaVuSans", 1, 0, "DejaVuSans-Bold")
             return ("DejaVuSans", "DejaVuSans-Bold")
     except Exception:
         pass
@@ -139,11 +149,15 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
 
     th = THEMES.get(theme, THEMES["blue"])
 
-    # pôvodné hlavičky
+    # hlavičky z Excelu
     xhdrs = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
     c_doc = _find_col(xhdrs, "Číslo dokladu")
     c_inv = _find_col(xhdrs, "číslo Faktúry") or _find_col(xhdrs, "Číslo Faktúry")
-    c_dz  = _find_col(xhdrs, "Dátum vystavenia /\nPripísania platby") or _find_col(xhdrs, "Dátum zadania")
+    # akceptuj viac variantov (s/bez medzery a s/bez zalomenia)
+    c_dz  = (_find_col(xhdrs, "Dátum vystavenia / Pripísania platby")
+             or _find_col(xhdrs, "Dátum vystavenia/Pripísania platby")
+             or _find_col(xhdrs, "Dátum vystavenia /\nPripísania platby")
+             or _find_col(xhdrs, "Dátum zadania"))
     c_du  = _find_col(xhdrs, "Dátum účtovania")
     c_sn  = _find_col(xhdrs, "Splatnosť netto")
     c_typ = _find_col(xhdrs, "Typ dokladu")
@@ -151,7 +165,6 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     c_bal = _find_col(xhdrs, "Zostatok")
     last  = _last_data_row(ws, c_doc)
 
-    # PDF hlavičky (aktualizované)
     pdf_hdrs = [
         "Č. dokladu",
         "Č. faktúry",
@@ -165,7 +178,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
 
     data = [[Paragraph(h, styles["HdrSmall"]) for h in pdf_hdrs]]
     run_bal = 0.0
-    def _is_faktura(txt): return isinstance(txt, str) and txt.strip().lower() == "faktúra"
+    def _is_faktura(txt): return isinstance(txt, str) and _norm(txt) == _norm("Faktúra")
 
     for r in range(HEADER_ROW+1, last+1):
         doc = ws.cell(row=r, column=c_doc).value
@@ -190,7 +203,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
         ]
         data.append(row)
 
-    # riadok "Súčet": len Zostatok, tučný; farba ako header
+    # "Súčet"
     total_row = [Paragraph("", styles["Cell"]) for _ in range(8)]
     total_row[5] = Paragraph("<b>Súčet</b>", styles["HdrSmall"])
     total_row[7] = Paragraph(f"<b>{_fmt_money(run_bal)}</b>", styles["CellRight"])
@@ -200,7 +213,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
 
-    # Hlavička s logom vľavo, text vpravo (firma je pevne "SWAN a.s.")
+    # Hlavička PDF
     title = Paragraph("Náhľad na fakturačný účet – saldo", styles["HdrTitle"])
     date_p = Paragraph(f"Dátum generovania: {_dt.datetime.now().strftime('%d.%m.%Y')}", styles["Base"])
     meta = Paragraph(
@@ -229,7 +242,7 @@ def _build_pdf(ws, hdr_meno, hdr_sap, hdr_ucet, hdr_spol, logo_bytes: Optional[b
     story = [header_tbl, Spacer(1, 6)]
 
     # tabuľka
-    col_widths = [75, 60, 58, 58, 58, 70, 62, 68]
+    col_widths = [75, 60, 70, 58, 58, 70, 62, 68]
     table = Table(data, repeatRows=1, colWidths=col_widths, hAlign="LEFT")
     table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor(th["header_hex"])),
@@ -282,22 +295,39 @@ def generate_saldo_document(
     wb = load_workbook(BytesIO(template_bytes), data_only=False)
     ws = wb[wb.sheetnames[0]]
     headers = [ws.cell(row=HEADER_ROW, column=c).value for c in range(1, ws.max_column+1)]
+
     c_doc = _find_col(headers, "Číslo dokladu")
     c_inv = _find_col(headers, "číslo Faktúry") or _find_col(headers, "Číslo Faktúry")
-    c_dz  = _find_col(headers, "Dátum zadania") or _find_col(headers, "Dátum vystavenia /\nPripísania platby")
+    # akceptuj viac variantov (s/bez medzery a s/bez zalomenia)
+    c_dz  = (_find_col(headers, "Dátum vystavenia / Pripísania platby")
+             or _find_col(headers, "Dátum vystavenia/Pripísania platby")
+             or _find_col(headers, "Dátum vystavenia /\nPripísania platby")
+             or _find_col(headers, "Dátum zadania"))
     c_du  = _find_col(headers, "Dátum účtovania")
     c_sn  = _find_col(headers, "Splatnosť netto")
     c_typ = _find_col(headers, "Typ dokladu")
     c_amt = _find_col(headers, "Čiastka")
     c_bal = _find_col(headers, "Zostatok")
-    if None in (c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal):
-        raise RuntimeError("V TEMPLATE chýba niektorý povinný stĺpec.")
 
-    # Premenuj hlavičku „Dátum zadania“ -> „Dátum vystavenia /\nPripísania platby“ a zapni wrap (rob až po nájdení indexov)
-    if c_dz:
-        hdr_cell = ws.cell(row=HEADER_ROW, column=c_dz)
-        hdr_cell.value = "Dátum vystavenia /\nPripísania platby"
-        # wrap text a centrovanie
+    if None in (c_doc, c_inv, c_dz, c_du, c_sn, c_typ, c_amt, c_bal):
+        # Diagnostická správa, aby bolo hneď jasné, čo chýba
+        missing = []
+        if c_doc is None: missing.append("Číslo dokladu")
+        if c_inv is None: missing.append("Číslo Faktúry/číslo Faktúry")
+        if c_dz  is None: missing.append("Dátum vystavenia / Pripísania platby / Dátum zadania")
+        if c_du  is None: missing.append("Dátum účtovania")
+        if c_sn  is None: missing.append("Splatnosť netto")
+        if c_typ is None: missing.append("Typ dokladu")
+        if c_amt is None: missing.append("Čiastka")
+        if c_bal is None: missing.append("Zostatok")
+        raise RuntimeError(f"V TEMPLATE chýba niektorý povinný stĺpec. Chýbajú: {', '.join(missing)}")
+
+    # Premenuj hlavičku „Dátum zadania“ -> nový text (ak je to práve tento stĺpec)
+    hdr_cell = ws.cell(row=HEADER_ROW, column=c_dz)
+    if _norm(hdr_cell.value) in (_norm("Dátum zadania"),
+                                 _norm("Dátum vystavenia/Pripísania platby"),
+                                 _norm("Dátum vystavenia / Pripísania platby")):
+        hdr_cell.value = "Dátum vystavenia / Pripísania platby"
         hdr_cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
 
     # --- HELPER (pomôcka) ---
@@ -348,7 +378,7 @@ def generate_saldo_document(
         ws.cell(row=r0, column=c_du,  value=ws1.cell(row=r, column=i_du).value if i_du else None)
 
         # Splatnosť len pri faktúrach, inak None
-        if mapped_typ and isinstance(mapped_typ, str) and mapped_typ.strip().lower() == "faktúra":
+        if mapped_typ and isinstance(mapped_typ, str) and _norm(mapped_typ) == _norm("Faktúra"):
             ws.cell(row=r0, column=c_sn, value=ws1.cell(row=r, column=i_sn).value if i_sn else None)
         else:
             ws.cell(row=r0, column=c_sn, value=None)
@@ -392,7 +422,7 @@ def generate_saldo_document(
                 s = str(v)
             ref_map[str(k).strip()] = s
 
-    def is_faktura(v): return isinstance(v, str) and v.strip()=="Faktúra"
+    def is_faktura(v): return isinstance(v, str) and _norm(v) == _norm("Faktúra")
     for rr in range(HEADER_ROW+1, last+1):
         doc = ws.cell(row=rr, column=c_doc).value
         typ = ws.cell(row=rr, column=c_typ).value
