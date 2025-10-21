@@ -43,6 +43,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])) {
             $logoBytes = file_get_contents($_FILES['logo']['tmp_name']) ?: null;
         }
+        if ($logoBytes === null) {
+            $defaultLogoPath = dirname(__DIR__, 2) . '/data/logo_4ka_circle.png';
+            if (is_readable($defaultLogoPath)) {
+                $logoBytes = file_get_contents($defaultLogoPath) ?: null;
+            }
+        }
 
         $hdrMeno = trim($_POST['hdr_meno'] ?? '');
         $hdrSap = trim($_POST['hdr_sap'] ?? '');
