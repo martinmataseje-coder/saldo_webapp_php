@@ -28,6 +28,14 @@ php_app/
    php -S 0.0.0.0:8080 -t public
    ```
 
+### Gitpod rýchly štart
+
+Ak nemáte PHP lokálne, môžete použiť pripravený Gitpod workspace:
+
+1. Otvorte adresu `https://gitpod.io/#<URL_na_repo>`, čím sa spustí nový workspace založený na tomto projekte.
+2. Gitpod načíta konfiguráciu zo súboru [`.gitpod.yml`](../.gitpod.yml), automaticky spustí `composer install` a rozbehne PHP server na porte `8080`.
+3. V Gitpode kliknite na ponúkaný port (Open Browser/Preview) a testujte aplikáciu priamo v prehliadači.
+
 ## Použitie
 
 1. Otvorte aplikáciu v prehliadači a nahrajte štyri XLSX súbory (template, helper, pohyby, väzby). Logo je voliteľné.

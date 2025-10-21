@@ -52,6 +52,17 @@ php -S 0.0.0.0:8080 -t public
 
 Potom otvor prehliadač na adrese `http://localhost:8080` a nahraj rovnaké Excel podklady ako v pôvodnej aplikácii.
 
+### Gitpod (bez lokálneho PHP)
+
+Ak máte iba účet na [gitpod.io](https://gitpod.io) a nechcete inštalovať PHP lokálne:
+
+1. Otvorte workspace priamo z tohto repozitára, napr. URL tvaru `https://gitpod.io/#<URL_na_repo>`.
+2. Gitpod automaticky načíta konfiguráciu zo súboru [`.gitpod.yml`](.gitpod.yml), spustí `composer install` v `php_app/` a rozbehne zabudovaný PHP server na porte `8080`.
+3. Po inicializácii sa v pravom hornom rohu Gitpodu zobrazí tlačidlo **Open Preview** alebo **Open Browser** – tým otvoríte bežiacu aplikáciu.
+4. V prehliadači workspace-u otestujte generovanie rovnako ako pri lokálnom behu (nahrajte XLSX súbory, vyplňte údaje a kliknite na **Generovať report**).
+
+Port je nakonfigurovaný ako verejný, takže môžete zdieľať náhľad aj kolegom v rámci firmy, prípadne nastaviť v Gitpode súkromnú viditeľnosť podľa potreby.
+
 ### Štruktúra
 
 - `php_app/src/SaldoGenerator.php` – port logiky zo `saldo_core.py` postavený na PhpSpreadsheet a Dompdf.
