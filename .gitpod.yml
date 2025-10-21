@@ -1,0 +1,15 @@
+image: gitpod/workspace-php
+
+tasks:
+  - name: Install PHP dependencies
+    init: |
+      composer install --working-dir=php_app
+  - name: Run PHP dev server
+    command: |
+      cd php_app
+      php -S 0.0.0.0:8080 -t public
+
+ports:
+  - port: 8080
+    onOpen: open-preview
+    visibility: public
