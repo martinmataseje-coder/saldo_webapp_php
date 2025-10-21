@@ -32,15 +32,13 @@ php_app/
 
 Ak nemáte PHP lokálne, môžete použiť pripravený Gitpod workspace:
 
-1. Prihláste sa na [gitpod.io](https://gitpod.io), na hlavnej obrazovke kliknite na **New Workspace** a do poľa *Repository URL* vložte adresu tohto repozitára. Tú získate tak, že si v inom okne otvoríte GitHub/GitLab a skopírujete URL z adresného riadka (napr. `https://github.com/vaša-organizácia/saldo_webapp`). Potvrďte tlačidlom **Create**. Prípadne otvorite novú kartu s adresou `https://gitpod.io/#<URL_na_repo>`, kde `<URL_na_repo>` nahradíte skutočnou URL repozitára.
-2. Po spustení workspace-u Gitpod načíta konfiguráciu zo súboru [`.gitpod.yml`](../.gitpod.yml), automaticky vykoná `composer install` a rozbehne zabudovaný PHP server na porte `8080`.
-3. V pravom hornom rohu Gitpodu sa objaví oznámenie o dostupnom porte – kliknite na **Open Browser** alebo **Open Preview** a zobrazí sa samotná aplikácia pripravená na testovanie.
-
-> 💡 Ak Gitpod vypíše hlášku *"Because there are no projects to choose from, auto-start was disabled"*, jednoducho kliknite na **New Workspace**, doplňte URL repozitára a pokračujte podľa krokov vyššie.
+1. Otvorte adresu `https://gitpod.io/#<URL_na_repo>`, čím sa spustí nový workspace založený na tomto projekte.
+2. Gitpod načíta konfiguráciu zo súboru [`.gitpod.yml`](../.gitpod.yml), automaticky spustí `composer install` a rozbehne PHP server na porte `8080`.
+3. V Gitpode kliknite na ponúkaný port (Open Browser/Preview) a testujte aplikáciu priamo v prehliadači.
 
 ## Použitie
 
-1. Otvorte aplikáciu v prehliadači a nahrajte dva XLSX súbory – **Pohyby** (`src1.xlsx`) a **Väzby** (`src2.xlsx`). Šablóna (`TEMPLATE_saldo.XLSX`) aj pomôcka (`pomocka k saldo (vlookup).XLSX`) sa načítajú automaticky zo zložky `data/`. Logo je voliteľné.
+1. Otvorte aplikáciu v prehliadači a nahrajte štyri XLSX súbory (template, helper, pohyby, väzby). Logo je voliteľné.
 2. Vyplňte hlavičku reportu (meno, SAP ID, zmluvný účet).
 3. Zvoľte farebnú tému a výstupný formát (XLSX alebo PDF).
 4. Kliknite na **Generovať report** – prehliadač okamžite stiahne vytvorený súbor.

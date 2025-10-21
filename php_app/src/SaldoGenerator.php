@@ -483,8 +483,7 @@ class SaldoGenerator
             return '';
         }
         $formatted = number_format($value, 2, ',', ' ');
-        $nbsp = "\u{00A0}";
-        return $formatted . $nbsp . '€';
+        return $formatted . '\u{00A0}€';
     }
 
     private function toFloat($value): ?float
@@ -495,8 +494,7 @@ class SaldoGenerator
         if (is_numeric($value)) {
             return (float)$value;
         }
-        $nbsp = "\u{00A0}";
-        $s = str_replace([' ', $nbsp], '', (string)$value);
+        $s = str_replace([' ', '\u{00A0}'], '', (string)$value);
         $s = str_replace(',', '.', $s);
         return is_numeric($s) ? (float)$s : null;
     }
