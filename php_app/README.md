@@ -40,7 +40,7 @@ Ak nemáte PHP lokálne, môžete použiť pripravený Gitpod workspace:
 
 ## Použitie
 
-1. Otvorte aplikáciu v prehliadači a nahrajte štyri XLSX súbory (template, helper, pohyby, väzby). Logo je voliteľné.
+1. Otvorte aplikáciu v prehliadači a nahrajte dva XLSX súbory – **Pohyby** (`src1.xlsx`) a **Väzby** (`src2.xlsx`). Šablóna (`TEMPLATE_saldo.XLSX`) aj pomôcka (`pomocka k saldo (vlookup).XLSX`) sa načítajú automaticky zo zložky `data/`. Logo je voliteľné.
 2. Vyplňte hlavičku reportu (meno, SAP ID, zmluvný účet).
 3. Zvoľte farebnú tému a výstupný formát (XLSX alebo PDF).
 4. Kliknite na **Generovať report** – prehliadač okamžite stiahne vytvorený súbor.

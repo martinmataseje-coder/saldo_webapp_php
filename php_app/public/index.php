@@ -17,13 +17,23 @@ $outputFormats = [
     'pdf' => 'PDF',
 ];
 
+$templatePath = dirname(__DIR__, 2) . '/data/TEMPLATE_saldo.XLSX';
+$helperPath = dirname(__DIR__, 2) . '/data/pomocka k saldo (vlookup).XLSX';
+
 $error = null;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!is_readable($templatePath) || !is_readable($helperPath)) {
+    $missing = [];
+    if (!is_readable($templatePath)) {
+        $missing[] = basename($templatePath);
+    }
+    if (!is_readable($helperPath)) {
+        $missing[] = basename($helperPath);
+    }
+    $error = 'Chýbajú povinné súbory v adresári data: ' . implode(', ', $missing);
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $requiredFiles = [
-            'template' => 'Šablóna (template.xlsx)',
-            'helper' => 'Pomôcka (helper.xlsx)',
             'movements' => 'Pohyby (src1.xlsx)',
             'references' => 'Väzby (src2.xlsx)',
         ];
@@ -37,6 +47,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($fileContents[$key] === false) {
                 throw new RuntimeException("Nepodarilo sa načítať súbor: {$label}");
             }
+        }
+
+        $templateBytes = file_get_contents($templatePath);
+        $helperBytes = file_get_contents($helperPath);
+        if ($templateBytes === false || $helperBytes === false) {
+            throw new RuntimeException('Nepodarilo sa načítať template alebo pomôcku z adresára data.');
         }
 
         $logoBytes = null;
@@ -70,8 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $generator = new SaldoGenerator();
         $binary = $generator->generate(
-            $fileContents['template'],
-            $fileContents['helper'],
+            $templateBytes,
+            $helperBytes,
             $fileContents['movements'],
             $fileContents['references'],
             $hdrMeno,
@@ -137,12 +153,7 @@ function h(?string $value): string
     <form method="post" enctype="multipart/form-data">
         <fieldset>
             <legend>Vstupné súbory</legend>
-            <label>Šablóna (template.xlsx)
-                <input type="file" name="template" accept=".xlsx" required />
-            </label>
-            <label>Pomôcka (helper.xlsx)
-                <input type="file" name="helper" accept=".xlsx" required />
-            </label>
+            <p class="note">Šablóna aj pomôcka sa načítajú automaticky zo složky <code>data/</code>. Nahrajte iba aktuálne pohyby a väzby.</p>
             <label>Pohyby (src1.xlsx)
                 <input type="file" name="movements" accept=".xlsx" required />
             </label>

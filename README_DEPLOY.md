@@ -50,7 +50,7 @@ composer install
 php -S 0.0.0.0:8080 -t public
 ```
 
-Potom otvor prehliadač na adrese `http://localhost:8080` a nahraj rovnaké Excel podklady ako v pôvodnej aplikácii.
+Potom otvor prehliadač na adrese `http://localhost:8080` a nahraj iba aktuálne súbory **Pohyby** (`src1.xlsx`) a **Väzby** (`src2.xlsx`). Šablóna aj pomôcka sa načítajú automaticky z priečinka `data/`.
 
 ### Gitpod (bez lokálneho PHP)
 
@@ -59,7 +59,7 @@ Ak máte iba účet na [gitpod.io](https://gitpod.io) a nechcete inštalovať PH
 1. Prihláste sa na [gitpod.io](https://gitpod.io) a na úvodnej obrazovke kliknite na **New Workspace**. V inom okne si otvorte svoj Git hosting (GitHub, GitLab…) a skopírujte kompletnú adresu repozitára – je to URL z adresného riadka prehliadača, napr. `https://github.com/vaša-organizácia/saldo_webapp`. Túto adresu vložte do poľa *Repository URL* a potvrďte tlačidlom **Create**. Ak chcete workspace otvoriť ešte rýchlejšie, vložte túto adresu priamo za prefix `https://gitpod.io/#` (napr. `https://gitpod.io/#https://github.com/vaša-organizácia/saldo_webapp`) a otvorte ju v novej karte.
 2. Workspace sa spustí, Gitpod načíta konfiguráciu zo súboru [`.gitpod.yml`](.gitpod.yml), automaticky spustí `composer install` v `php_app/` a rozbehne zabudovaný PHP server na porte `8080`.
 3. Po inicializácii sa v pravom hornom rohu Gitpodu zobrazí oznámenie o dostupnom porte. Kliknite na **Open Preview** (zabudovaný panel) alebo **Open Browser** (nová karta) a zobrazí sa rozhranie aplikácie.
-4. V prehliadači workspace-u otestujte generovanie rovnako ako pri lokálnom behu – nahrajte XLSX súbory, vyplňte údaje a kliknite na **Generovať report**. Súbory sa stiahnu priamo cez Gitpod rozhranie.
+4. V prehliadači workspace-u otestujte generovanie rovnako ako pri lokálnom behu – nahrajte iba XLSX súbory pohybov a väzieb, vyplňte údaje a kliknite na **Generovať report**. Súbory sa stiahnu priamo cez Gitpod rozhranie.
 
 > 💡 Ak Gitpod zobrazí hlásenie *"Because there are no projects to choose from, auto-start was disabled"*, kliknite na **New Workspace**, vložte URL repozitára a pokračujte podľa krokov vyššie – ide len o upozornenie, že je potrebné adresu repozitára zadať ručne.
 
