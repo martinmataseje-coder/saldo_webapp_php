@@ -1,0 +1,542 @@
+<?php
+
+namespace Saldo;
+
+use DateTimeInterface;
+use Dompdf\Dompdf;
+use Dompdf\Options;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+
+class SaldoGenerator
+{
+    private const HEADER_ROW = 9;
+    private const DATE_FORMAT = 'dd.mm.yy';
+
+    private const THEMES = [
+        'blue' => ['header' => '#25B3AD', 'alt' => '#F9FEFD', 'grid' => '#E2E8F0'],
+        'gray' => ['header' => '#4A5568', 'alt' => '#F7F7F7', 'grid' => '#D9D9D9'],
+        'warm' => ['header' => '#C6A875', 'alt' => '#FFF9F2', 'grid' => '#EADDC8'],
+    ];
+
+    /**
+     * @throws \RuntimeException
+     */
+    public function generate(
+        string $templateBytes,
+        string $helperBytes,
+        string $src1Bytes,
+        string $src2Bytes,
+        string $hdrMeno,
+        string $hdrSap,
+        string $hdrUcet,
+        string $hdrSpol = 'SWAN a.s.',
+        string $theme = 'blue',
+        ?string $logoBytes = null,
+        string $output = 'xlsx'
+    ): string {
+        $spreadsheet = $this->loadSpreadsheetFromString($templateBytes);
+        $sheet = $spreadsheet->getSheet(0);
+
+        // --- Načítaj hlavičky zo šablóny
+        $headers = [];
+        $maxColIdx = Coordinate::columnIndexFromString($sheet->getHighestColumn());
+        for ($c = 1; $c <= $maxColIdx; $c++) {
+            $headers[$c] = $sheet->getCellByColumnAndRow($c, self::HEADER_ROW)->getValue();
+        }
+
+        // Dôležité stĺpce v šablóne (robustné názvy)
+        $cDoc = $this->findColumn($headers, 'Číslo dokladu');
+        $cInv = $this->findColumn($headers, 'Číslo Faktúry') ?? $this->findColumn($headers, 'číslo Faktúry');
+        $cDz  = $this->findColumn($headers, 'Dátum vystavenia / Pripísania platby')
+                ?? $this->findColumn($headers, 'Dátum vystavenia/Pripísania platby')
+                ?? $this->findColumn($headers, "Dátum vystavenia /\nPripísania platby")
+                ?? $this->findColumn($headers, 'Dátum zadania');
+        $cDu  = $this->findColumn($headers, 'Dátum účtovania');
+        $cSn  = $this->findColumn($headers, 'Splatnosť netto');
+        $cTyp = $this->findColumn($headers, 'Typ dokladu');
+        $cAmt = $this->findColumn($headers, 'Čiastka');
+        $cBal = $this->findColumn($headers, 'Zostatok');
+
+        foreach (['Číslo dokladu' => $cDoc, 'Typ dokladu' => $cTyp, 'Čiastka' => $cAmt, 'Zostatok' => $cBal] as $name => $ok) {
+            if (!$ok) {
+                throw new \RuntimeException("V šablóne chýba povinný stĺpec: {$name}");
+            }
+        }
+
+        // Normalizuj hlavičku dátumu v šablóne (aby bol tvar konzistentný)
+        if ($cDz) {
+            $dzHeaderCell = $sheet->getCellByColumnAndRow($cDz, self::HEADER_ROW);
+            $dzHeaderCell->setValue('Dátum vystavenia / Pripísania platby');
+            $sheet->getStyleByColumnAndRow($cDz, self::HEADER_ROW)->getAlignment()
+                ->setWrapText(true)->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+        }
+
+        // --- Vyčisti existujúce riadky pod hlavičkou
+        $existingLast = $sheet->getHighestRow();
+        if ($existingLast > self::HEADER_ROW) {
+            $sheet->removeRow(self::HEADER_ROW + 1, $existingLast - self::HEADER_ROW);
+        }
+
+        // --- Pomôcka (mapovanie: Označenie pôvodu -> Typ dokladu)
+        $mapping = $this->loadMapping($helperBytes, 'Označenie pôvodu', 'Typ dokladu');
+
+        // --- Zdroj 1 (pohyby)
+        $src1 = $this->loadSpreadsheetFromString($src1Bytes);
+        $s1 = $src1->getSheet(0);
+        $s1MaxColIdx = Coordinate::columnIndexFromString($s1->getHighestColumn());
+        $s1Headers = [];
+        for ($c = 1; $c <= $s1MaxColIdx; $c++) {
+            $s1Headers[$c] = $s1->getCellByColumnAndRow($c, 1)->getValue();
+        }
+        $idxDoc = $this->findExactColumn($s1Headers, 'Číslo dokladu');
+        $idxDz  = $this->findExactColumn($s1Headers, 'Dátum zadania');
+        $idxDu  = $this->findExactColumn($s1Headers, 'Dátum účtovania');
+        $idxSn  = $this->findExactColumn($s1Headers, 'Splatnosť netto');
+        $idxOp  = $this->findExactColumn($s1Headers, 'Označenie pôvodu');
+        $idxAmt = $this->findExactColumn($s1Headers, 'Čiastka');
+
+        $writeRow = self::HEADER_ROW + 1;
+        $s1Rows = $s1->getHighestRow();
+        for ($r = 2; $r <= $s1Rows; $r++) {
+            $doc = $idxDoc ? $s1->getCellByColumnAndRow($idxDoc, $r)->getValue() : null;
+            if ($doc === null || $doc === '') {
+                continue;
+            }
+            $ozn = $idxOp ? $s1->getCellByColumnAndRow($idxOp, $r)->getValue() : null;
+            $typ = null;
+            if ($ozn !== null) {
+                $key = is_string($ozn) ? trim($ozn) : (string)$ozn;
+                if ($key !== '' && array_key_exists($key, $mapping)) {
+                    $typ = $mapping[$key];
+                }
+            }
+
+            // zápis do šablóny
+            $sheet->setCellValueByColumnAndRow($cDoc, $writeRow, $doc);
+            if ($cDz)  { $sheet->setCellValueByColumnAndRow($cDz,  $writeRow, $idxDz ? $s1->getCellByColumnAndRow($idxDz, $r)->getValue() : null); }
+            if ($cDu)  { $sheet->setCellValueByColumnAndRow($cDu,  $writeRow, $idxDu ? $s1->getCellByColumnAndRow($idxDu, $r)->getValue() : null); }
+            if ($cSn)  {
+                $sheet->setCellValueByColumnAndRow(
+                    $cSn,
+                    $writeRow,
+                    ($typ && $this->isInvoice($typ) && $idxSn) ? $s1->getCellByColumnAndRow($idxSn, $r)->getValue() : null
+                );
+            }
+            $sheet->setCellValueByColumnAndRow($cTyp, $writeRow, $typ);
+            $sheet->setCellValueByColumnAndRow($cAmt, $writeRow, $idxAmt ? $s1->getCellByColumnAndRow($idxAmt, $r)->getValue() : 0);
+            $writeRow++;
+        }
+
+        // --- priebežný zostatok (vzorce pre XLSX)
+        $lastRow = $writeRow - 1;
+        $colAmtLetter = Coordinate::stringFromColumnIndex($cAmt);
+        $colBalLetter = Coordinate::stringFromColumnIndex($cBal);
+        for ($r = self::HEADER_ROW + 1; $r <= $lastRow; $r++) {
+            $formula = $r === self::HEADER_ROW + 1
+                ? sprintf('=%s%d', $colAmtLetter, $r)
+                : sprintf('=%s%d+%s%d', $colBalLetter, $r - 1, $colAmtLetter, $r);
+            $sheet->setCellValueByColumnAndRow($cBal, $r, $formula);
+        }
+
+        // --- dátumové stĺpce vo formáte
+        foreach ([$cDz, $cDu, $cSn] as $dc) {
+            if ($dc) {
+                $sheet->getStyleByColumnAndRow($dc, self::HEADER_ROW + 1, $dc, $lastRow)
+                    ->getNumberFormat()->setFormatCode(self::DATE_FORMAT);
+            }
+        }
+
+        // --- Zdroj 2 (väzby: doplnková referencia → číslo faktúry)
+        $src2 = $this->loadSpreadsheetFromString($src2Bytes);
+        $s2 = $src2->getSheet(0);
+        $s2MaxColIdx = Coordinate::columnIndexFromString($s2->getHighestColumn());
+        $s2Headers = [];
+        for ($c = 1; $c <= $s2MaxColIdx; $c++) {
+            $s2Headers[$c] = $s2->getCellByColumnAndRow($c, 1)->getValue();
+        }
+        $idx2Doc = $this->findExactColumn($s2Headers, 'Číslo dokladu');
+        $idx2Ref = $this->findExactColumn($s2Headers, 'Doplnková referencia');
+        if (!$idx2Doc || !$idx2Ref) {
+            throw new \RuntimeException("V zdroji 2 chýba 'Číslo dokladu' alebo 'Doplnková referencia'.");
+        }
+
+        $refMap = [];
+        $s2Rows = $s2->getHighestRow();
+        for ($r = 2; $r <= $s2Rows; $r++) {
+            $doc = $s2->getCellByColumnAndRow($idx2Doc, $r)->getValue();
+            $ref = $s2->getCellByColumnAndRow($idx2Ref, $r)->getValue();
+            if ($doc === null || $doc === '') continue;
+
+            $key = trim((string)$doc);
+            $val = '';
+            if (is_string($ref)) {
+                $val = trim($ref);
+                $upper = strtoupper($val);
+                if (str_starts_with($upper, 'VBRK')) {
+                    $val = trim(substr($val, 4));
+                }
+            } elseif ($ref !== null) {
+                $val = (string)$ref;
+            }
+            $refMap[$key] = $val;
+        }
+
+        for ($r = self::HEADER_ROW + 1; $r <= $lastRow; $r++) {
+            $docValue = $sheet->getCellByColumnAndRow($cDoc, $r)->getValue();
+            $typValue = $sheet->getCellByColumnAndRow($cTyp, $r)->getValue();
+            if ($this->isInvoice(is_string($typValue) ? $typValue : null)) {
+                $key = trim((string)$docValue);
+                $sheet->setCellValueByColumnAndRow(
+                    $cInv,
+                    $r,
+                    ($key !== '' && array_key_exists($key, $refMap)) ? ($refMap[$key] ?: null) : null
+                );
+            } else {
+                $sheet->setCellValueByColumnAndRow($cInv, $r, null);
+            }
+        }
+
+        // --- Hlavička údajov
+        $sheet->setCellValue('B1', $hdrSap);
+        $sheet->setCellValue('B2', $hdrMeno);
+        $sheet->setCellValue('B3', $hdrSpol);
+        $sheet->setCellValue('B4', $hdrUcet);
+
+        // Logo + štýly
+        $this->insertLogo($sheet, $logoBytes);
+        $this->styleWorksheet($sheet, $lastRow, $theme);
+
+        // --- Export
+        if ($output === 'pdf') {
+            return $this->buildPdf($sheet, $hdrMeno, $hdrSap, $hdrUcet, $hdrSpol, $logoBytes, $theme);
+        }
+
+        // Odstráň stĺpce napravo od "Zostatok"
+        $highestColIdx = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($sheet->getHighestColumn());
+        if ($cBal && $highestColIdx > $cBal) {
+            $sheet->removeColumn(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($cBal + 1), $highestColIdx - $cBal);
+        }
+
+        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        // Pri XLSX necháme Excel prepočítať vzorce; tu nevyžadujeme prepočet.
+        ob_start();
+        $writer->save('php://output');
+        return (string)ob_get_clean();
+    }
+
+    private function loadSpreadsheetFromString(string $bytes): Spreadsheet
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'saldo');
+        file_put_contents($tmp, $bytes);
+        $reader = IOFactory::createReader('Xlsx');
+        $reader->setReadDataOnly(false);
+        $spreadsheet = $reader->load($tmp);
+        @unlink($tmp);
+        return $spreadsheet;
+    }
+
+    private function loadMapping(string $bytes, string $srcHeader, string $dstHeader): array
+    {
+        $map = [];
+        $spreadsheet = $this->loadSpreadsheetFromString($bytes);
+        $sheet = $spreadsheet->getSheet(0);
+        $maxColIdx = Coordinate::columnIndexFromString($sheet->getHighestColumn());
+        $headers = [];
+        for ($c = 1; $c <= $maxColIdx; $c++) {
+            $headers[$c] = trim((string)$sheet->getCellByColumnAndRow($c, 1)->getValue());
+        }
+        $cSrc = array_search($srcHeader, $headers, true);
+        $cDst = array_search($dstHeader, $headers, true);
+        if (!$cSrc || !$cDst) return [];
+
+        $rows = $sheet->getHighestRow();
+        for ($r = 2; $r <= $rows; $r++) {
+            $src = trim((string)$sheet->getCellByColumnAndRow($cSrc, $r)->getValue());
+            $dst = trim((string)$sheet->getCellByColumnAndRow($cDst, $r)->getValue());
+            if ($src !== '') $map[$src] = $dst;
+        }
+        return $map;
+    }
+
+    private function styleWorksheet(Worksheet $sheet, int $lastRow, string $theme): void
+    {
+        $palette = self::THEMES[$theme] ?? self::THEMES['blue'];
+        $hex = fn(string $h) => ltrim($h, '#');
+
+        // hlavičkový riadok
+        $headerRange = sprintf('A%d:%s%d', self::HEADER_ROW, $sheet->getHighestColumn(), self::HEADER_ROW);
+        $headerStyle = $sheet->getStyle($headerRange);
+        $headerStyle->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+        $headerStyle->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB($hex($palette['header']));
+        $headerStyle->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+            ->setVertical(Alignment::VERTICAL_CENTER)
+            ->setWrapText(true);
+        $headerStyle->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB($hex($palette['grid']));
+
+        // jemné orámovanie riadkov + zebra
+        $maxColLetter = $sheet->getHighestColumn();
+        $borderStyle = [
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => $hex($palette['grid'])],
+                ],
+            ],
+        ];
+        for ($r = self::HEADER_ROW + 1; $r <= $lastRow; $r++) {
+            $range = sprintf('A%d:%s%d', $r, $maxColLetter, $r);
+            $sheet->getStyle($range)->applyFromArray($borderStyle);
+            if ((($r - (self::HEADER_ROW + 1)) % 2) === 0) {
+                $sheet->getStyle($range)->getFill()
+                    ->setFillType(Fill::FILL_SOLID)
+                    ->getStartColor()->setRGB(ltrim(self::THEMES[$theme]['alt'], '#'));
+            }
+        }
+    }
+
+    private function insertLogo(Worksheet $sheet, ?string $logoBytes): void
+    {
+        if ($logoBytes === null || $logoBytes === '') return;
+
+        $tmp = tempnam(sys_get_temp_dir(), 'saldo_logo');
+        $ext = $this->detectImageExtension($logoBytes) ?? 'png';
+        $path = $tmp . '.' . $ext;
+        file_put_contents($path, $logoBytes);
+
+        $drawing = new Drawing();
+        $drawing->setPath($path);
+        $drawing->setCoordinates('A1');
+        $drawing->setHeight(60);
+        $drawing->setWorksheet($sheet);
+    }
+
+    private function detectImageExtension(string $bytes): ?string
+    {
+        $finfo = new \finfo(FILEINFO_MIME_TYPE);
+        $mime = $finfo->buffer($bytes);
+        return match ($mime) {
+            'image/png'  => 'png',
+            'image/jpeg' => 'jpg',
+            'image/gif'  => 'gif',
+            default      => null,
+        };
+    }
+
+    private function isInvoice(?string $value): bool
+    {
+        if (!$value) return false;
+        return stripos($value, 'fakt') !== false; // „Faktúra“, „Faktura“, …
+    }
+
+    private function toFloat($value): ?float
+    {
+        if ($value === null || $value === '') return null;
+        if (is_numeric($value)) return (float)$value;
+        $s = str_replace(["\xC2\xA0", "\u{00A0}", ' '], '', (string)$value);
+        $s = str_replace(',', '.', $s);
+        return is_numeric($s) ? (float)$s : null;
+    }
+
+    private function formatMoney(?float $value): string
+    {
+        return $value !== null ? number_format($value, 2, ',', ' ') . ' €' : '';
+    }
+
+    private function formatDate($value): string
+    {
+        if ($value instanceof DateTimeInterface) return $value->format('d.m.Y');
+        if (is_numeric($value)) {
+            try {
+                $dt = ExcelDate::excelToDateTimeObject((float)$value);
+                if ($dt instanceof DateTimeInterface) return $dt->format('d.m.Y');
+            } catch (\Throwable) {}
+        }
+        if ($value === null) return '';
+        $s = trim((string)$value);
+        if ($s === '') return '';
+        if (str_contains($s, ' ')) $s = explode(' ', $s)[0];
+        if (str_contains($s, '-')) {
+            $p = explode('-', $s);
+            if (count($p) === 3) return sprintf('%s.%s.%s', $p[2], $p[1], $p[0]);
+        }
+        return $s;
+    }
+
+    private function buildPdf(
+        Worksheet $sheet,
+        string $hdrMeno,
+        string $hdrSap,
+        string $hdrUcet,
+        string $hdrSpol,
+        ?string $logoBytes,
+        string $theme
+    ): string {
+        $palette = self::THEMES[$theme] ?? self::THEMES['blue'];
+        $generatedDate = date('d.m.Y');
+
+        // načítaj hlavičky a pozície stĺpcov
+        $maxColIdx = Coordinate::columnIndexFromString($sheet->getHighestColumn());
+        $headers = [];
+        for ($c = 1; $c <= $maxColIdx; $c++) {
+            $headers[$c] = $sheet->getCellByColumnAndRow($c, self::HEADER_ROW)->getValue();
+        }
+        $cDoc = $this->findColumn($headers, 'Číslo dokladu');
+        $cInv = $this->findColumn($headers, 'Číslo Faktúry') ?? $this->findColumn($headers, 'číslo Faktúry');
+        $cDz  = $this->findColumn($headers, 'Dátum vystavenia / Pripísania platby') ?? $this->findColumn($headers, 'Dátum zadania');
+        $cDu  = $this->findColumn($headers, 'Dátum účtovania');
+        $cSn  = $this->findColumn($headers, 'Splatnosť netto');
+        $cTyp = $this->findColumn($headers, 'Typ dokladu');
+        $cAmt = $this->findColumn($headers, 'Čiastka');
+        $cBal = $this->findColumn($headers, 'Zostatok');
+
+        // data riadky – čítame priamo PREPOČÍTANÉ hodnoty pre PDF
+        $lastRow = $sheet->getHighestRow();
+        $rowsHtml = '';
+        $lastBal = 0.0;
+
+        for ($r = self::HEADER_ROW + 1; $r <= $lastRow; $r++) {
+            $doc = $cDoc ? $sheet->getCellByColumnAndRow($cDoc, $r)->getValue() : '';
+            if ($doc === null || $doc === '') {
+                continue; // preskoč prázdne
+            }
+            $inv = $cInv ? $sheet->getCellByColumnAndRow($cInv, $r)->getValue() : '';
+            $dz  = $cDz  ? $this->formatDate($sheet->getCellByColumnAndRow($cDz,  $r)->getValue()) : '';
+            $du  = $cDu  ? $this->formatDate($sheet->getCellByColumnAndRow($cDu,  $r)->getValue()) : '';
+            $sn  = $cSn  ? $this->formatDate($sheet->getCellByColumnAndRow($cSn,  $r)->getValue()) : '';
+            $typ = $cTyp ? $sheet->getCellByColumnAndRow($cTyp, $r)->getValue() : '';
+            $amt = $cAmt ? $this->toFloat($sheet->getCellByColumnAndRow($cAmt, $r)->getCalculatedValue()) : null;
+
+            // Zostatok – PREPOČÍTANÁ hodnota bunky (nie text vzorca)
+            $balCalc = $cBal ? $this->toFloat($sheet->getCellByColumnAndRow($cBal, $r)->getCalculatedValue()) : null;
+            if ($balCalc !== null) {
+                $lastBal = $balCalc;
+            }
+
+            $rowsHtml .= '<tr>';
+            $rowsHtml .= '<td>' . htmlspecialchars((string)$doc, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td>';
+            $rowsHtml .= '<td>' . ($this->isInvoice(is_string($typ) ? $typ : null) ? htmlspecialchars((string)$inv, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : '') . '</td>';
+            $rowsHtml .= '<td class="tac">' . htmlspecialchars($dz, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td>';
+            $rowsHtml .= '<td class="tac">' . htmlspecialchars($du, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td>';
+            $rowsHtml .= '<td class="tac">' . ($this->isInvoice(is_string($typ) ? $typ : null) ? htmlspecialchars($sn, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : '') . '</td>';
+            $rowsHtml .= '<td>' . htmlspecialchars((string)$typ, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td>';
+            $rowsHtml .= '<td class="tar">' . $this->formatMoney($amt) . '</td>';
+            $rowsHtml .= '<td class="tar">' . $this->formatMoney($balCalc) . '</td>';
+            $rowsHtml .= '</tr>';
+        }
+
+        $total = $this->formatMoney($lastBal);
+        $logoHtml = $logoBytes
+            ? '<img src="data:image/png;base64,'.base64_encode($logoBytes).'" alt="Logo" style="height:60px;width:60px;object-fit:contain;" />'
+            : '';
+
+        // PDF HTML – hlavička ako 2-stĺpcová tabuľka (spoľahlivé v dompdf)
+        $headersPdf = [
+            'Č. dokladu', 'Č. faktúry', "Dátum vystavenia /\nPripísania platby",
+            'Dátum účt.', 'Splatnosť', 'Typ dokladu', 'Čiastka', 'Zostatok',
+        ];
+        $headerHtml = '';
+        foreach ($headersPdf as $txt) {
+            $headerHtml .= '<th>' . nl2br(htmlspecialchars($txt, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) . '</th>';
+        }
+
+        $html = <<<HTML
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<title>Saldo report</title>
+<style>
+    body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #0f172a; }
+    .title { font-size: 18px; font-weight: bold; margin: 0 0 4px 0; }
+    .meta { margin: 0; }
+    .tac { text-align: center; }
+    .tar { text-align: right; }
+    table { border-collapse: collapse; width: 100%; }
+    th { background: {$palette['header']}; color: #ffffff; padding: 4px; font-size: 10px; }
+    td { padding: 4px; font-size: 9px; border: 1px solid {$palette['grid']}; }
+    .header-table, .header-table td { border: 0 !important; }
+    tbody tr { page-break-inside: avoid; }
+    tr:nth-child(odd) td { background: #ffffff; }
+    tr:nth-child(even) td { background: {$palette['alt']}; }
+</style>
+</head>
+<body>
+
+<table class="header-table" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:8px;">
+  <tr>
+    <td style="width:60px; vertical-align:top;">
+      {$logoHtml}
+    </td>
+    <td style="vertical-align:top;">
+      <p class="title">Náhľad na fakturačný účet – saldo</p>
+      <p class="meta">Dátum generovania: <strong>{$generatedDate}</strong></p>
+      <p class="meta">{$this->escapeHtml($hdrSpol)} — <strong>Meno:</strong> {$this->escapeHtml($hdrMeno)} • <strong>SAP ID:</strong> {$this->escapeHtml($hdrSap)} • <strong>Zmluvný účet:</strong> {$this->escapeHtml($hdrUcet)}</p>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <thead>
+    <tr>{$headerHtml}</tr>
+  </thead>
+  <tbody>
+    {$rowsHtml}
+  </tbody>
+</table>
+
+<div style="margin-top:8px; width:100%; text-align:right; font-weight:bold; background: {$palette['header']}; color:#fff; padding:6px 8px;">
+  Celková suma&nbsp;&nbsp; {$this->escapeHtml($total)}
+</div>
+
+</body>
+</html>
+HTML;
+
+        $options = new Options();
+        $options->set('isRemoteEnabled', true);
+        $options->set('defaultFont', 'DejaVu Sans'); // diakritika
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($html, 'UTF-8');
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+        return $dompdf->output();
+    }
+
+    private function escapeHtml(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    private function findColumn(array $headers, string $name): ?int
+    {
+        $target = mb_strtolower($name, 'UTF-8');
+        foreach ($headers as $idx => $header) {
+            $v = mb_strtolower((string)$header, 'UTF-8');
+            if (strpos($v, $target) !== false) {
+                return (int)$idx;
+            }
+        }
+        return null;
+    }
+
+    private function findExactColumn(array $headers, string $name): ?int
+    {
+        foreach ($headers as $idx => $header) {
+            if (is_string($header) && trim($header) === $name) {
+                return (int)$idx;
+            }
+        }
+        return null;
+    }
+}
